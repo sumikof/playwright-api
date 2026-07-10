@@ -5,7 +5,8 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "24"
     },
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "./features/playwright-deps": {}
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
@@ -16,6 +17,12 @@
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume"
   ],
+  "appPort": [
+    "0.0.0.0:3000:3000"
+  ],
+  "portsAttributes": {
+    "3000": { "label": "npm run dev" }
+  },
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/ubuntu/.claude",
@@ -26,5 +33,6 @@
   "waitFor": "postStartCommand",
   "postCreateCommand": {
     "ls command": "claude plugin marketplace add obra/superpowers-marketplace && claude plugin install superpowers@superpowers-marketplace",
+    "install playwright": "npx playwright install chromium",
   }
 }

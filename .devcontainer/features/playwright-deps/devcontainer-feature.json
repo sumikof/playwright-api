@@ -1,0 +1,6 @@
+{
+  "id": "playwright-deps",
+  "version": "1.0.0",
+  "name": "Playwright browser system dependencies",
+  "description": "Chromium を Playwright で起動するために必要な共有ライブラリを apt で入れる。install.sh はビルド時に root で実行されるため sudo は不要。"
+}

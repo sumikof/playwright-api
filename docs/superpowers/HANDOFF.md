@@ -88,25 +88,33 @@ Error: browserType.launch:
 
 つまり、セッション内から後付けで修復する手段はない。
 
-### 最短の手順（rootで入り直した直後にこれを実行する）
+### 採用した対処: ローカルフィーチャー（実装済み・リビルドで有効になる）
 
-rootであれば apt が使えるので、その場で不足ライブラリを入れられる。
+`.devcontainer/features/playwright-deps/` にローカルフィーチャーを追加済み。
+フィーチャーの `install.sh` は**ビルド時にrootで実行される**ため `sudo` が要らない。
+`devcontainer.json` の `features` に `"./features/playwright-deps": {}` を登録済み。
+ブラウザ本体は `postCreateCommand` の `npx playwright install chromium`（ubuntuユーザーでも
+`~/.cache` に落とせる）で入る。
 
-```bash
-npx playwright install-deps chromium   # apt で共有ライブラリを入れる
-npx playwright install chromium        # ブラウザ本体（未取得なら）
-```
+**再開時にやることは「コンテナをリビルドする」だけ。** リビルド後に下の検証スニペットが通る。
 
-ただし**これはコンテナをリビルドすると消える**。下の恒久対応も併せて入れること。
+追加/変更したファイル:
+- `.devcontainer/features/playwright-deps/devcontainer-feature.json`
+- `.devcontainer/features/playwright-deps/install.sh`（apt で共有ライブラリを入れる、実行権限付き）
+- `.devcontainer/devcontainer.json`（`features` に登録、`postCreateCommand` を `install-deps` → `install` に変更）
 
-### 恒久対応（イメージ定義を直す）
+もしリビルドが待てず今すぐ動かしたい場合は、rootシェルで `bash .devcontainer/features/playwright-deps/install.sh`
+を一度手で流してもよい（これは揮発。恒久化はフィーチャー側が担う）。
 
-以下のいずれか。**推奨は A**。
+### 別解（不採用。参考）
 
-#### A. `.devcontainer/Dockerfile` を追加する（推奨）
+以下は検討したが採らなかった。**採用は上のフィーチャー方式**。
+
+#### A. `.devcontainer/Dockerfile` を追加する
 
 ビルド時にrootで apt install するため確実で、イメージ層にキャッシュされるのでコンテナ起動が遅くならない。
 既存の `features` / `remoteUser` / `mounts` はそのまま使える。
+（採用したフィーチャー方式と同じことをDockerfileでやる版。どちらでも良いが、今回はフィーチャーにした。）
 
 `.devcontainer/Dockerfile`:
 
@@ -273,7 +281,7 @@ M .devcontainer/devcontainer.json   ← セッション開始前からの変更�
 ## 7. 再開手順
 
 1. root権限でコンテナに入り直す
-2. 上記「4. ブロッカー」の対処案 A を適用する（`.devcontainer/Dockerfile` の追加 + `devcontainer.json` の `image` → `build`）
+2. 対処は適用済み（`.devcontainer/features/playwright-deps/` のローカルフィーチャー）。追加作業は不要
 3. コンテナをリビルドする
 4. 「検証手順」のスニペットで `hello` が出ることを確認する
 5. Claude Code を起動し、このファイルを読ませる
