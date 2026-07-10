@@ -4,8 +4,10 @@
 
 ## このドキュメントの目的
 
-devcontainerでPlaywrightのブラウザが起動できず、root権限がないためセッション内から修復できない。
-コンテナをroot権限で入り直したあと、ここから作業を再開するための引き継ぎ。
+devcontainerでPlaywrightのブラウザが起動できなかった（ベースイメージに共有ライブラリが無い）。
+対処としてローカルフィーチャーを追加済みで、**コンテナをリビルドすれば解消する**。
+root で入り直す必要はない（フィーチャーの install.sh はビルド時に自動でrootで走るため。実行ユーザーは `ubuntu` のままでよい）。
+このドキュメントは、リビルド後にここから実装を再開するための引き継ぎ。
 
 ---
 
@@ -61,7 +63,11 @@ scenario.run() ───┤                                                   �
 
 ---
 
-## 4. ブロッカー: devcontainerでブラウザが起動しない
+## 4. ブロッカー: devcontainerでブラウザが起動しない（対処済み・要リビルド）
+
+> **要約**: ローカルフィーチャー追加済み。`ubuntu` のままコンテナをリビルドすれば解消する。
+> root で入り直す必要はない。以下は経緯と詳細。
+
 
 ### 症状
 
@@ -280,16 +286,16 @@ M .devcontainer/devcontainer.json   ← セッション開始前からの変更�
 
 ## 7. 再開手順
 
-1. root権限でコンテナに入り直す
-2. 対処は適用済み（`.devcontainer/features/playwright-deps/` のローカルフィーチャー）。追加作業は不要
-3. コンテナをリビルドする
-4. 「検証手順」のスニペットで `hello` が出ることを確認する
-5. Claude Code を起動し、このファイルを読ませる
-6. **`superpowers:writing-plans` スキルで実装計画を作る。**
+1. コンテナをリビルドする（`Dev Containers: Rebuild Container`）。**`ubuntu` のままでよい。root で入り直す必要はない**
+   - 対処は適用済み（`.devcontainer/features/playwright-deps/` のローカルフィーチャーがビルド時にrootで共有ライブラリを入れる）
+2. 「検証手順」のスニペットで `hello` が出ることを確認する
+   - もし sandbox 関連のエラーが出たら `chromium.launch({ args: ['--no-sandbox'] })` を試す（ライブラリ問題とは別の、次に出うる問題）
+3. Claude Code を起動し、このファイルを読ませる
+4. **`superpowers:writing-plans` スキルで実装計画を作る。**
    入力は `docs/superpowers/specs/2026-07-09-playwright-e2e-api-server-design.md` と、
    本ファイルの「5. 調査済みの技術的事実」および「スペックからの微修正」
-7. 計画を `docs/superpowers/plans/YYYY-MM-DD-playwright-e2e-api-server.md` に保存してコミット
-8. `superpowers:subagent-driven-development` または `superpowers:executing-plans` で実装する
+5. 計画を `docs/superpowers/plans/YYYY-MM-DD-playwright-e2e-api-server.md` に保存してコミット
+6. `superpowers:subagent-driven-development` または `superpowers:executing-plans` で実装する
 
 ### 実装計画に含めるべきタスクの見取り図
 
