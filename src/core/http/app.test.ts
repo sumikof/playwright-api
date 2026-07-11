@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from '@hono/zod-openapi'
@@ -8,7 +8,7 @@ import { defineScenario } from '../scenario.js'
 import { Queue } from '../run/queue.js'
 import { FileRunStore } from '../run/store.js'
 import { RunService } from '../run/service.js'
-import type { RunJob } from '../run/types.js'
+import type { RunJob, RunResult } from '../run/types.js'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'app-')) })
@@ -81,5 +81,61 @@ describe('createApp', () => {
     const { app } = makeApp()
     const res = await app.request('/health')
     expect(await res.json()).toEqual({ status: 'ok' })
+  })
+})
+
+describe('artifact route', () => {
+  const runId = 'RART'
+  const artifactName = '01-product-list.png'
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+  async function seedRun(store: FileRunStore) {
+    const result: RunResult = {
+      runId,
+      scenarioId: 'login',
+      status: 'passed',
+      params: {},
+      queuedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 10,
+      steps: [],
+      data: { userName: 'x' },
+      error: null,
+      artifacts: [{ kind: 'screenshot', name: artifactName, url: `/runs/${runId}/artifacts/${artifactName}` }],
+    }
+    await store.finish(runId, result)
+    const runDir = join(dir, runId)
+    await mkdir(runDir, { recursive: true })
+    await writeFile(join(runDir, artifactName), pngBytes)
+  }
+
+  it('serves a recorded artifact with the right content type', async () => {
+    const { app, store } = makeApp()
+    await seedRun(store)
+    const res = await app.request(`/runs/${runId}/artifacts/${artifactName}`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('image/png')
+    const body = Buffer.from(await res.arrayBuffer())
+    expect(body.equals(pngBytes)).toBe(true)
+  })
+
+  it('rejects path-traversal and unrecorded artifact names with 404', async () => {
+    const { app, store } = makeApp()
+    await seedRun(store)
+
+    const traversalRes = await app.request(
+      `/runs/${runId}/artifacts/${encodeURIComponent('../../../etc/passwd')}`,
+    )
+    expect(traversalRes.status).toBe(404)
+
+    const unrecordedRes = await app.request(`/runs/${runId}/artifacts/not-recorded.png`)
+    expect(unrecordedRes.status).toBe(404)
+  })
+
+  it('returns 404 for an unknown run', async () => {
+    const { app } = makeApp()
+    const res = await app.request(`/runs/UNKNOWN/artifacts/${artifactName}`)
+    expect(res.status).toBe(404)
   })
 })
