@@ -36,9 +36,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await provider.close()
-  demoServer.close()
-  await rm(runsDir, { recursive: true, force: true })
+  try { if (provider) await provider.close() } catch {}
+  try { if (demoServer) demoServer.close() } catch {}
+  try { if (runsDir) await rm(runsDir, { recursive: true, force: true }) } catch {}
 })
 
 async function poll(runId: string): Promise<any> {
