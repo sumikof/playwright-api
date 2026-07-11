@@ -80,4 +80,11 @@ describe('FileRunStore', () => {
     const fresh = new FileRunStore(dir)
     expect((await fresh.get('R4'))?.status).toBe('passed')
   })
+
+  it('rethrows non-ENOENT read errors instead of swallowing them', async () => {
+    const store = new FileRunStore(dir)
+    // Create result.json as a directory, not a file, so readFile() throws EISDIR (not ENOENT).
+    await mkdir(join(dir, 'R5', 'result.json'), { recursive: true })
+    await expect(store.get('R5')).rejects.toThrow()
+  })
 })

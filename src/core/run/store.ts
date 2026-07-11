@@ -85,8 +85,9 @@ export class FileRunStore implements RunStore {
   private async tryRead(path: string): Promise<string | undefined> {
     try {
       return await readFile(path, 'utf8')
-    } catch {
-      return undefined
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw err
     }
   }
 }
