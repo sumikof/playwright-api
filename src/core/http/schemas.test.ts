@@ -17,6 +17,12 @@ describe('schemas', () => {
       steps: [], data: null, error: { message: 'x' }, artifacts: [],
     })
     expect(nullData.success).toBe(true)
+    const invalidData = schema.safeParse({
+      runId: 'R1', scenarioId: 'login', status: 'passed', params: {},
+      queuedAt: 't', startedAt: 't', finishedAt: 't', durationMs: 1,
+      steps: [], data: { userName: 123 }, error: null, artifacts: [],
+    })
+    expect(invalidData.success).toBe(false)
   })
 
   it('acceptedSchema requires queued status', () => {
