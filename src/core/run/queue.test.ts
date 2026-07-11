@@ -41,4 +41,17 @@ describe('Queue', () => {
     expect(q.enqueue(2)).toBe(false) // 満杯
     expect(q.hasCapacity()).toBe(false)
   })
+
+  it('keeps running after a worker rejects', async () => {
+    const ran: number[] = []
+    const q = new Queue<number>({ maxConcurrency: 1, maxQueue: 10 }, async (i) => {
+      ran.push(i)
+      if (i === 0) throw new Error('boom')
+    })
+    q.enqueue(0)
+    q.enqueue(1)
+    await q.drain()
+    expect(ran).toEqual([0, 1]) // second job ran even though the first threw; drain didn't hang
+    expect(q.stats).toEqual({ waiting: 0, running: 0 })
+  })
 })

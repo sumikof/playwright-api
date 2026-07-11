@@ -28,7 +28,7 @@ export class Queue<J> {
 
   private pump(): void {
     while (this.running < this.opts.maxConcurrency && this.waiting.length > 0) {
-      const job = this.waiting.shift() as J
+      const job = this.waiting.shift()!
       this.running++
       void this.worker(job)
         .catch(() => {})
