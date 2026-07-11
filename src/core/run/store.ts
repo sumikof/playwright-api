@@ -51,6 +51,9 @@ export class FileRunStore implements RunStore {
     this.memory.set(runId, result)
     await mkdir(this.runDir(runId), { recursive: true })
     await writeFile(join(this.runDir(runId), 'result.json'), JSON.stringify(result, null, 2))
+    // Bound memory to in-flight (queued/running) runs; get() falls back to
+    // reading result.json from disk for finished runs.
+    this.memory.delete(runId)
   }
 
   async get(runId: string): Promise<RunResult | undefined> {

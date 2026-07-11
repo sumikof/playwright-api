@@ -84,6 +84,30 @@ describe('createApp', () => {
   })
 })
 
+describe('queue-full 503', () => {
+  it('returns 503 once the queue (running + waiting) is saturated', async () => {
+    const store = new FileRunStore(dir)
+    // Worker hangs forever, so the first submission occupies the single
+    // concurrency slot and never frees it during this test.
+    const queue = new Queue<RunJob>({ maxConcurrency: 1, maxQueue: 1 }, () => new Promise(() => {}))
+    const service = new RunService(queue, store)
+    const app = createApp({ scenarios: [loginScenario], service, runsDir: dir })
+
+    const body = JSON.stringify({ email: 'a@b.com', password: 'pw' })
+    const headers = { 'content-type': 'application/json' }
+
+    const first = await app.request('/scenarios/login/runs', { method: 'POST', headers, body })
+    expect(first.status).toBe(202) // occupies the running slot (worker hangs)
+
+    const second = await app.request('/scenarios/login/runs', { method: 'POST', headers, body })
+    expect(second.status).toBe(202) // fills the single waiting slot
+
+    const third = await app.request('/scenarios/login/runs', { method: 'POST', headers, body })
+    expect(third.status).toBe(503)
+    expect(await third.json()).toEqual({ error: { message: 'Queue is full' } })
+  })
+})
+
 describe('artifact route', () => {
   const runId = 'RART'
   const artifactName = '01-product-list.png'

@@ -81,6 +81,23 @@ describe('FileRunStore', () => {
     expect((await fresh.get('R4'))?.status).toBe('passed')
   })
 
+  it('evicts the finished run from memory after finish() persists result.json', async () => {
+    const store = new FileRunStore(dir)
+    await store.create('R6', 'login', { email: 'a@b.c' }, '2026-07-10T00:00:00.000Z')
+    await store.finish('R6', finishedResult('R6'))
+
+    // Disk fallback still works right after finish (result.json was just written).
+    const stillThere = await store.get('R6')
+    expect(stillThere?.status).toBe('passed')
+
+    // Now remove result.json from disk. If finish() evicted the in-memory entry,
+    // get() must fall through to meta.json and report 'interrupted'. If the finished
+    // entry were still cached in memory, get() would still return 'passed' here.
+    await rm(join(dir, 'R6', 'result.json'))
+    const afterDiskDelete = await store.get('R6')
+    expect(afterDiskDelete?.status).toBe('interrupted')
+  })
+
   it('rethrows non-ENOENT read errors instead of swallowing them', async () => {
     const store = new FileRunStore(dir)
     // Create result.json as a directory, not a file, so readFile() throws EISDIR (not ENOENT).
