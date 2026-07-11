@@ -35,8 +35,8 @@ export class Runner {
 
   async run(job: RunJob): Promise<void> {
     const startedAt = new Date().toISOString()
-    const startMs = Date.now()
     await this.deps.store.markRunning(job.runId, startedAt)
+    const startMs = Date.now()
 
     const runDir = join(this.deps.runsDir, job.runId)
     let context: BrowserContext | undefined
@@ -64,18 +64,27 @@ export class Runner {
       } catch (e) {
         status = 'failed'
         error = { message: errMessage(e), stack: errStack(e) }
-        try {
-          await page.screenshot({ path: join(runDir, 'failure.png'), fullPage: true })
-          sctx.artifacts.push({ kind: 'screenshot', name: 'failure.png', url: `/runs/${job.runId}/artifacts/failure.png` })
-        } catch {
-          // screenshot failure is swallowed (prioritize the original error)
-        }
       } finally {
         if (status === 'failed') {
-          await context.tracing.stop({ path: join(runDir, 'trace.zip') })
-          sctx.artifacts.push({ kind: 'trace', name: 'trace.zip', url: `/runs/${job.runId}/artifacts/trace.zip` })
+          // capture failure.png on ANY failure (thrown OR schema-mismatch)
+          try {
+            await page.screenshot({ path: join(runDir, 'failure.png'), fullPage: true })
+            sctx.artifacts.push({ kind: 'screenshot', name: 'failure.png', url: `/runs/${job.runId}/artifacts/failure.png` })
+          } catch {
+            // screenshot capture is best-effort; never let it clobber the real failure
+          }
+          try {
+            await context.tracing.stop({ path: join(runDir, 'trace.zip') })
+            sctx.artifacts.push({ kind: 'trace', name: 'trace.zip', url: `/runs/${job.runId}/artifacts/trace.zip` })
+          } catch {
+            // tracing.stop failure must not overwrite the real scenario error/artifacts
+          }
         } else {
-          await context.tracing.stop()
+          try {
+            await context.tracing.stop()
+          } catch {
+            // ignore
+          }
         }
       }
 

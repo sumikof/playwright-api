@@ -43,6 +43,18 @@ const failScenario = defineScenario({
   },
 })
 
+const schemaMismatchScenario = defineScenario({
+  id: 'schema-mismatch',
+  summary: 'resolves without throwing but violates its own result schema',
+  tags: [],
+  params: z.object({}),
+  result: z.object({ value: z.string() }),
+  async run(ctx) {
+    await ctx.page.setContent('<h1>mismatch</h1>')
+    return { value: 123 } as any
+  },
+})
+
 function job(scenario: RunJob['scenario'], runId: string): RunJob {
   return { runId, scenario, params: {}, queuedAt: '2026-07-10T00:00:00.000Z' }
 }
@@ -72,6 +84,20 @@ describe('Runner', () => {
     expect(result?.status).toBe('failed')
     expect(result?.data).toBeNull()
     expect(result?.error?.message).toContain('kaboom')
+    const kinds = result?.artifacts.map((a) => a.name) ?? []
+    expect(kinds).toContain('failure.png')
+    expect(kinds).toContain('trace.zip')
+  })
+
+  it('runs a scenario that resolves but violates its result schema, still saves failure.png and trace.zip', async () => {
+    const store = new FileRunStore(dir)
+    const runner = new Runner({ provider, store, baseURL: 'http://x.test', runsDir: dir, timeoutMs: 30000 })
+    await store.create('S1', 'schema-mismatch', {}, '2026-07-10T00:00:00.000Z')
+    await runner.run(job(schemaMismatchScenario, 'S1'))
+    const result = await store.get('S1')
+    expect(result?.status).toBe('failed')
+    expect(result?.data).toBeNull()
+    expect(result?.error?.message).toMatch(/schema/i)
     const kinds = result?.artifacts.map((a) => a.name) ?? []
     expect(kinds).toContain('failure.png')
     expect(kinds).toContain('trace.zip')
