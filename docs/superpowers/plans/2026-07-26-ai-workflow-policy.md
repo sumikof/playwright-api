@@ -12,6 +12,8 @@
 
 **作業ブランチ:** 既存の `docs/ai-workflow-policy`(Draft PR #1)。本成果物は同ブランチ・同 PR に追加し、実装完了後に PR で最終 Codex レビュー → ユーザー受け入れ → マージする。
 
+> **注(正典)**: 本 plan 内のコード/ドキュメント埋め込みブロックは**計画時点の内容**であり、最終レビュー反映後の実ファイル(`docs/engineering-standards.md`・`docs/operations/ai-workflow-policy.md`・`CLAUDE.md` 等)が正典。差異があれば実ファイルに従う。
+
 ## Global Constraints
 
 - **言語**: すべて日本語(既存 `README.md`・docs に合わせる)。
@@ -65,8 +67,10 @@
 - **Playwright の npm バージョンと Docker イメージタグは完全一致**させる。`package.json` は
   キャレット(`^`)を付けず固定する(詳細と背景は
   `docs/superpowers/specs/2026-07-24-offline-docker-openshift-design.md` を参照)。
-- 依存の更新は Issue → Draft PR → レビューの通常フローに従う(機械的更新でも CI と
-  マージ判断は省略しない)。
+  ※ 現時点の `package.json` は `^1.61.1`(未固定)。実際の固定と lockfile 再生成は
+  `docs/superpowers/specs/2026-07-24-offline-docker-openshift-design.md` の作業で実施する(本方針はその適用対象)。
+- 依存の更新も Issue → Draft PR → レビューの通常フローに従い、ローカル検証(`npm test` 等)と
+  人間のマージ判断は省略しない。CI 必須化は CI 導入後に適用する(CI 導入は推奨する次ステップ)。
 
 ## コード規約
 
