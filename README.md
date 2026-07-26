@@ -74,7 +74,7 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 1. `src/pages/` — 対象システムの Page Object を書く
 2. `src/scenarios/` — シナリオを定義し `src/scenarios/index.ts` に登録
 3. `tests/` — `@playwright/test` の spec を書く
-4. `fixtures/demo-app/` — **削除する**（同梱のデモ対象アプリ）
+4. `fixtures/demo-app/` — **残す**（削除すると upstream merge 衝突を招くため。登録解除は fork 所有の `src/scenarios/index.ts` で行う）
 5. `BASE_URL` を対象システムに向ける
 
 ## 意図的に含めないもの

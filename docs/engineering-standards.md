@@ -16,6 +16,8 @@
 - **Playwright の npm バージョンと Docker イメージタグは完全一致**させる。`package.json` は
   キャレット(`^`)を付けず固定する(詳細と背景は
   `docs/superpowers/specs/2026-07-24-offline-docker-openshift-design.md` を参照)。
+  ※ 現時点の `package.json` は `^1.61.1`(未固定)。実際の固定と lockfile 再生成は
+  `docs/superpowers/specs/2026-07-24-offline-docker-openshift-design.md` の作業で実施する(本方針はその適用対象)。
 - 依存の更新も Issue → Draft PR → レビューの通常フローに従い、ローカル検証(`npm test` 等)と
   人間のマージ判断は省略しない。CI 必須化は CI 導入後に適用する(CI 導入は推奨する次ステップ)。
 

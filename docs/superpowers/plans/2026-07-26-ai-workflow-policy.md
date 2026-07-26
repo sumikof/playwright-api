@@ -57,7 +57,7 @@
 ## 言語とランタイム
 
 - 言語: TypeScript(ESM、`"type": "module"`)。
-- ランタイム: Node.js 20 系。HTTP は Hono(`@hono/node-server`)、OpenAPI は `@hono/zod-openapi`。
+- ランタイム: Node.js 24 系。HTTP は Hono(`@hono/node-server`)、OpenAPI は `@hono/zod-openapi`。
 - ブラウザ自動化: Playwright(`playwright` / `@playwright/test`)。
 
 ## 固定バージョン方針
