@@ -6,7 +6,9 @@
 ## 言語とランタイム
 
 - 言語: TypeScript(ESM、`"type": "module"`)。
-- ランタイム: Node.js 20 系。HTTP は Hono(`@hono/node-server`)、OpenAPI は `@hono/zod-openapi`。
+- ランタイム: Node.js 24 系(実行環境=devcontainer に一致。型定義は `@types/node` の都合で
+  `^20` を使用しているが、実行時ランタイムの基準は 24)。HTTP は Hono(`@hono/node-server`)、
+  OpenAPI は `@hono/zod-openapi`。
 - ブラウザ自動化: Playwright(`playwright` / `@playwright/test`)。
 
 ## 固定バージョン方針
@@ -14,8 +16,8 @@
 - **Playwright の npm バージョンと Docker イメージタグは完全一致**させる。`package.json` は
   キャレット(`^`)を付けず固定する(詳細と背景は
   `docs/superpowers/specs/2026-07-24-offline-docker-openshift-design.md` を参照)。
-- 依存の更新は Issue → Draft PR → レビューの通常フローに従う(機械的更新でも CI と
-  マージ判断は省略しない)。
+- 依存の更新も Issue → Draft PR → レビューの通常フローに従い、ローカル検証(`npm test` 等)と
+  人間のマージ判断は省略しない。CI 必須化は CI 導入後に適用する(CI 導入は推奨する次ステップ)。
 
 ## コード規約
 
