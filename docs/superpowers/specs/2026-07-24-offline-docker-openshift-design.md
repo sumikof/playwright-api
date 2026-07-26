@@ -68,9 +68,9 @@ swagger-ui アセットを読む HTML を返すため、オフラインでは `/
 - テスト:
   - `/ui` が返す HTML と初期化スクリプトに外部 URL(他ホストの `http://`/`https://`)が
     含まれず、`validatorUrl: null` が設定されていることを検証するユニットテスト
-  - 可能なら `/ui` の実描画で外部ホストへのネットワーク要求が発生しないことを確認する
-    (ブラウザ/ネットワーク観測。HTML 静的検査だけでは bundle 実行時の validator 通信を
-    捕捉できないため)
+  - **(必須)** `/ui` をブラウザ(Playwright、既に依存にある)で実描画し、**外部ホストへの
+    ネットワーク要求がゼロ**であることを検証するテスト。HTML 静的検査だけでは bundle 実行時の
+    validator 通信を捕捉できないため、これを Phase 1 の必須テストとし §6 完了条件にも含める
 
 ### 2.2 ブラウザ起動オプションの外部化
 
@@ -238,7 +238,7 @@ fork 側で削除するとテンプレート側の変更時に modify/delete 衝
 
 | Phase | 内容 | 完了条件 |
 |---|---|---|
-| 1. CDN 排除 | Swagger UI 自前配信(`validatorUrl: null`)、`BROWSER_LAUNCH_ARGS` 追加、E2E 探索の env 駆動化(`BASE_URL`)+ デモ spec 分離 | 既存テスト green + 新規テスト(/ui 外部 URL・validator 不在、launch args 伝播、`BASE_URL` 指定でデモを起動せず対象のみ実行) |
+| 1. CDN 排除 | Swagger UI 自前配信(`validatorUrl: null`)、`BROWSER_LAUNCH_ARGS` 追加、E2E 探索の env 駆動化(`BASE_URL`)+ デモ spec 分離 | 既存テスト green + 新規テスト(/ui HTML の外部 URL・validator 不在、**/ui 実描画で外部要求ゼロ(必須)**、launch args 伝播、`BASE_URL` 指定でデモを起動せず対象のみ実行) |
 | 2. Docker | `scripts/package-deps.sh`、Dockerfile、`.dockerignore`、`docs/offline-build.md` | ローカルで docker build 成功、コンテナ起動して `/health` と demo シナリオ実行が成功 |
 | 3. OpenShift | `deploy/base`(Route 無し)+ `deploy/overlays/example`(Route は opt-in)、`docs/deploy-openshift.md` | `kustomize build` が妥当な YAML を出力。base に Route が含まれず、overlay で opt-in・保護前提が明記(実クラスタ検証は持ち込み後) |
 | 4. テンプレート運用 | `scripts/sync-upstream.sh`、README 更新(所有権表・fork 手順・削除方針変更) | スクリプトの動作確認(ローカルの bare repo を upstream に見立てたテスト) |
