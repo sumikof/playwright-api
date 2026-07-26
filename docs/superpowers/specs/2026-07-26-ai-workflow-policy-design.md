@@ -144,9 +144,12 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 
    承認済み要件を削って plan に合わせる(整合性の帳尻合わせ)は禁止する。
 10. `superpowers:executing-plans` または `superpowers:subagent-driven-development` で実装 + テスト
-11. ローカル検証(`npm test`, `npx playwright test` 等)の結果を PR に記録し、Draft 解除
+11. **ブランチが base に追随済みか確認** — 現在の base SHA が HEAD の祖先であること
+    (`git merge-base --is-ancestor <base> HEAD`)。追随していなければ base を取り込んで(rebase/merge)
+    から進む。そのうえでローカル検証(`npm test`, `npx playwright test` 等)の結果を PR に記録し、
+    Draft 解除(検証・レビューは常に「最新 base を取り込んだ HEAD」に対して行う)
 12. `@codex review`(最終レビュー用テンプレ)。最終レビュー対象 SHA **と、その時点の base ブランチ
-    SHA** を PR に記録する
+    SHA** を PR に記録する(この base は手順11の確認により HEAD の祖先であることが保証される)
 13. **最終レビュー指摘の解消(受け入れの前提)**: 最新レビューの全指摘について、Claude が
     妥当性を検証し、次のいずれかで決着させる — (a) 修正 → **手順11 のローカル検証を再実行**して
     結果を PR に更新 → 最新 SHA で再レビュー(手順12)、または (b) 非対応の根拠を PR に記録し、
