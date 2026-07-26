@@ -74,6 +74,8 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 
 ### 6.1 `CLAUDE.md`(Claude Code 向け)
 
+- **冒頭に FORK.md 分岐**: リポジトリ直下に `FORK.md` が存在する場合、以下のテンプレート運用指示は
+  適用せず `FORK.md` に従う(§10 参照)
 - Issue と既存ドキュメントを確認してから作業する
 - 設計開始時に Draft PR を先行作成する
 - 設計承認前に製品コードを実装しない
@@ -88,12 +90,16 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 
 ### 6.2 `AGENTS.md`(Codex 向け)
 
+- **冒頭に FORK.md 分岐**: リポジトリ直下に `FORK.md` が存在する場合、以下のテンプレート運用指示は
+  適用せず `FORK.md` に従う(§10 参照)
 - Issue、spec、実装コード、テストを相互に照合する
 - 設計フェーズと実装フェーズでレビュー観点を切り替える
 - 重大なバグ・回帰・セキュリティ問題を優先し、重大度・発生条件・影響・根拠・最小修正案を示す
 - 好みや根拠のないスタイル指摘を避ける
 - 情報不足時は推測で断定せず不足情報を示す
-- プロジェクト固有の互換要件(Playwright の npm バージョンとイメージタグの完全一致等)を守る
+- プロジェクト固有の互換要件は `docs/engineering-standards.md` の固定バージョン方針への**適合を確認する**
+  責任のみを負う(Playwright の npm 版とイメージタグ一致などの具体規則は共通基準側にのみ置き、
+  ここには再掲しない)
 - 共通基準は `docs/engineering-standards.md` を参照
 
 ### 6.3 `docs/engineering-standards.md`(共通基準)
@@ -112,14 +118,32 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 2. Claude が作業ブランチ + **Draft PR** を作成(`Relates to #<N>`)。push は **HTTPS/gh 経由**
 3. 設計 = `superpowers:brainstorming` → spec 作成・コミット・PR 本文へ反映
 4. PR に `@codex review`(設計レビュー用テンプレ)を投稿
-5. Claude が各指摘の妥当性を検証 → spec 修正、対応しない指摘は根拠を PR に記録、対象 SHA を記録
-6. ユーザーが PR で設計承認コメント(定型文)。承認前は実装しない
-7. 承認後 = `superpowers:writing-plans` で plan 作成 →
-   `superpowers:executing-plans` または `superpowers:subagent-driven-development` で実装 + テスト
-8. ローカル検証(`npm test`, `npx playwright test` 等)の結果を PR に記録し、Draft 解除
-9. `@codex review`(最終レビュー用テンプレ)→ 指摘対応・必要なら再レビュー、最終 SHA を記録
-10. ユーザー受け入れ確認(方針書のチェックリスト形式)
-11. ユーザーがマージ(直前に `Closes #<N>` へ変更)→ Issue close、残課題は別 Issue へ
+5. Claude が各指摘の妥当性を検証 → spec 修正。対応しない指摘は根拠を PR に記録
+6. **spec を変更したら最新 SHA で `@codex review` を再実行**する(設計レビューの再取得)。
+   spec に実質的な変更がある限り、「最後に Codex が設計レビューした SHA」が最新コミットに
+   一致するまで承認へ進まない
+7. ユーザーが PR で設計承認コメント(定型文)。**承認コメントは対象 SHA を明記し、その SHA は
+   「最後に Codex が設計レビューした SHA」と一致していること**。承認前は実装しない
+8. 承認後 = `superpowers:writing-plans` で plan 作成
+9. **plan 整合性チェック(実装前ゲート)**: plan の各タスクが spec と受け入れ条件に対応することを
+   確認する。plan が spec に無い設計判断を追加、または承認済み設計から逸脱する場合は、実装に
+   入らず spec を更新して §7 手順 4〜7(設計レビュー + 承認)へ戻す
+10. `superpowers:executing-plans` または `superpowers:subagent-driven-development` で実装 + テスト
+11. ローカル検証(`npm test`, `npx playwright test` 等)の結果を PR に記録し、Draft 解除
+12. `@codex review`(最終レビュー用テンプレ)。最終レビュー対象 SHA を記録
+13. **最終レビュー後に spec / コード / テストを変更したら、その時点で最終レビューは無効化**され、
+    最新 SHA で `@codex review` を再実行する(「必要なら」ではなく必須)
+14. ユーザー受け入れ確認(方針書のチェックリスト形式)。**受け入れ対象 SHA を明記**する
+15. ユーザーがマージ(直前に `Closes #<N>` へ変更)。**マージ時 HEAD = 受け入れ対象 SHA =
+    Codex 最終レビュー済み SHA の三者一致を必須**とする(CI・ブランチ保護が無いため、この一致は
+    人間が手動で確認する)。→ Issue close、残課題は別 Issue へ
+
+### SHA 一致の不変条件(自動ゲートが無い運用の要)
+
+- **設計承認**: 承認 SHA = 最後に Codex が設計レビューした SHA
+- **最終マージ**: マージ時 HEAD = ユーザー受け入れ SHA = Codex 最終レビュー済み SHA
+- いずれの段階でも、レビュー後に内容が変わったらそのレビューは無効化し、最新 SHA で再レビューする。
+  CI・ブランチ保護でこれを機械的に強制できないため、**PR 上での SHA 記録と人間の目視確認**で担保する
 
 ### 設計レビューへ戻す条件(方針書 7.6 準拠)
 
@@ -138,18 +162,35 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 
 ## 9. サブエージェント方針
 
-- 実装・ファイル変更を伴う作業は**直列・最大1・並列禁止**を既定とする(方針書 5.1 準拠)。
-- read-only の調査(`Explore` 等)に限り軽い並列を許容する。
-- 並列を使う場合も、変更のマージや状態共有を伴わないことを条件とする。
+- **同時 writer は主エージェントを含めて全体で1**とする(サブエージェントだけを数えるのではない)。
+  ファイル・生成物・Git 状態を変更する作業は、主エージェント + サブエージェントを合わせて
+  常に高々1つに限る(方針書 5.1 準拠)。
+- **read-only の定義**: 作業ツリー・リポジトリ状態・Git 状態・生成物/キャッシュのいずれも
+  変更しない操作(検索・読取・成果物を残さない解析等)。これらに限り複数を並列してよい。
+- read-only 並列の上限はハーネスの既定同時実行数に従う。依存インストール、キャッシュ生成、
+  `git` 状態の変更などを伴う調査コマンドは read-only とみなさず、直列の writer 枠で扱う。
 
 ## 10. 適用範囲と fork 配慮
 
-- 方針ファイル(`CLAUDE.md` / `AGENTS.md` / `docs/engineering-standards.md` /
-  `docs/operations/ai-workflow-policy.md` / 将来の CI)はテンプレート開発用。
-- upstream merge で fork にも届くが、各ファイル冒頭と README に
-  「**fork 側は自システムの運用に置換・削除してよい(参考扱い)**」と明記する。
-- fork 側が削除しても upstream merge 衝突が起きにくいよう、既存の
-  「demo-app は残す・登録解除は fork 所有ファイルで行う」方針(offline spec)と整合させる。
+方針ファイル(`CLAUDE.md` / `AGENTS.md` / `docs/engineering-standards.md` /
+`docs/operations/ai-workflow-policy.md` / 将来の CI)は **upstream 所有**でありテンプレート開発用。
+
+- fork は**これらを削除・編集しない**。削除・編集すると upstream merge 時に modify/delete または
+  内容競合を招くため(既存の「demo-app は残す」方針と同じ理由)。
+- **fork の opt-out は「fork 所有・upstream に存在しないマーカーファイル」で行う**:
+  - fork はリポジトリ直下に `FORK.md`(upstream には存在しない、fork 所有)を作成し、
+    自システムの運用を記述する。
+  - upstream 所有の `CLAUDE.md` / `AGENTS.md` は**冒頭に次の分岐を明記**する:
+    「**リポジトリ直下に `FORK.md` が存在する場合、本ファイルのテンプレート運用指示
+    (Issue → Draft PR → Codex → …)は適用せず、`FORK.md` の指示に従う**」。
+  - これにより、未変更の fork ではテンプレート運用が有効、opt-out したい fork は upstream 所有
+    ファイルを一切触らず `FORK.md` を1つ追加するだけで切替できる(upstream が同ファイルを
+    更新しても衝突しない)。
+- README にもこの opt-out 手順(`FORK.md` を置く)を明記する。
+
+> 補足: 冒頭に「参考扱い」と書くだけでは、未変更 fork でも AI ツールが root の
+> `CLAUDE.md` / `AGENTS.md` を自動読込するため運用指示が実質有効になってしまう。マーカーファイルに
+> よる明示的 opt-out はこの読込を分岐で無効化するための仕組みである。
 
 ## 11. 直近の offline/Docker/OpenShift 作業への適用
 
@@ -158,10 +199,11 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
   1. Issue 起票(offline/Docker/OpenShift 対応)
   2. Draft PR 作成(`Relates to #<N>`)
   3. 既存 spec を `@codex review`(設計レビュー)
-  4. ユーザー設計承認
+  4. ユーザー設計承認(承認 SHA = 設計レビュー済み SHA)
   5. `superpowers:writing-plans` で
      `docs/superpowers/plans/2026-07-24-offline-docker-openshift.md` を作成
-  6. 実装(Phase 1〜4)
+  6. plan 整合性チェック(plan ↔ spec / 受け入れ条件の対応確認)
+  7. 実装(Phase 1〜4)
 - 従来の「main へ直コミット」は Issue / Draft PR 起点へ切り替える。
 
 ## 12. この見直しで作る/更新する成果物
@@ -176,20 +218,53 @@ main へ直コミット)を**統合した折衷版**として定義しなおす�
 | `docs/engineering-standards.md` | 共通基準(6.3) |
 | `.github/pull_request_template.md` | 方針書 §8 の PR 本文構成(フェーズチェックリスト・検証結果表・レビュー履歴表) |
 | Codex 依頼テンプレ | 設計/最終レビュー依頼文(方針書 §9)。方針書ドキュメント内に収録 |
-| `README.md` 追記 | 運用フロー概要、fork 側の扱い(参考/置換可)への言及 |
+| `README.md` 追記 | 運用フロー概要、fork の opt-out 手順(`FORK.md` を置く / §10) |
+
+`CLAUDE.md` と `AGENTS.md` は冒頭に FORK.md 分岐(§10)を含める。
 
 ## 13. 受け入れ条件
 
-- 折衷版ワークフローが `docs/operations/ai-workflow-policy.md` に明文化されている
-- `CLAUDE.md` / `AGENTS.md` / `docs/engineering-standards.md` が作成され、共通基準を重複なく参照している
-- PR テンプレートと Codex 依頼テンプレが利用可能
-- 「テンプレート開発のみ適用 / fork は参考扱い」が各所に明記されている
-- 直近の offline/Docker/OpenShift 作業が本ワークフロー(Issue → Draft PR → Codex 設計レビュー
-  → 承認 → plan → 実装)で開始できる状態になっている
+成果物・方針が以下をすべて満たすとき本設計を完了とする。各条件は成果物内の対応箇所まで
+検証できること。
+
+**ワークフローの明文化(`docs/operations/ai-workflow-policy.md`)**
+
+- §7 の全工程が記載されている: Issue → Draft PR → 設計 → Codex 設計レビュー → 再レビュー →
+  設計承認 → plan → plan 整合性チェック → 実装 → ローカル検証 → Codex 最終レビュー →
+  再レビュー → ユーザー受け入れ → マージ → Issue close(残課題は別 Issue)
+- 設計レビューへ戻す条件(§7 の該当節)が記載されている
+- SHA 一致の不変条件が記載されている(承認 SHA = 設計レビュー済み SHA、マージ HEAD =
+  受け入れ SHA = 最終レビュー済み SHA)
+- CI 見送り時の手動ゲート(ローカル検証コマンド + チェックリスト + 人間の承認・受け入れ・マージ)が
+  記載されている
+- サブエージェント制約(同時 writer 全体で1、read-only の定義と並列上限)が記載されている
+
+**指示ファイル**
+
+- `CLAUDE.md` / `AGENTS.md` / `docs/engineering-standards.md` が作成されている
+- 具体的な互換規則(Playwright の npm 版とイメージタグ一致等)は
+  `docs/engineering-standards.md` にのみ存在し、`AGENTS.md` は適合確認責任のみを記載している
+- `CLAUDE.md` / `AGENTS.md` 冒頭に FORK.md 分岐が記載されている
+
+**テンプレート**
+
+- `.github/pull_request_template.md`(方針書 §8 構成)が利用可能
+- Codex 設計/最終レビュー依頼テンプレが利用可能
+
+**fork 配慮**
+
+- fork は upstream 所有ファイルを削除・編集せず `FORK.md` 追加のみで opt-out できることが
+  明記され、README にも手順がある
+
+**直近作業への接続**
+
+- offline/Docker/OpenShift 作業が本フロー(Issue → Draft PR → Codex 設計レビュー → 承認 →
+  plan → plan 整合性チェック → 実装)で開始できる状態になっている
 
 ## 14. リスク・未決事項
 
-- **リスク**: 方針ファイルが fork に波及し、fork 側の運用と齟齬を生む可能性 → 各ファイル冒頭の
-  「参考扱い」明記と README で緩和。将来、fork 向けに一部を削除する仕組みが必要になれば別途検討。
+- **リスク**: 方針ファイルが fork に波及し、fork 側の運用と齟齬を生む可能性 → upstream 所有ファイルは
+  fork 側で削除・編集させず、fork 所有の `FORK.md`(§10)による明示的 opt-out で切替える設計とした
+  (削除に伴う modify/delete 衝突を回避)。将来 opt-out の粒度を上げる必要があれば別途検討。
 - **未決**: 将来 CI を導入する時期・トリガー(体制やリリース頻度の変化で再検討)。
 - **未決**: 独立 ADR 体系を導入するか(当面は spec 集約で運用し、決定が増えたら再検討)。
