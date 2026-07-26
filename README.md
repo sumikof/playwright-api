@@ -74,7 +74,7 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 1. `src/pages/` — 対象システムの Page Object を書く
 2. `src/scenarios/` — シナリオを定義し `src/scenarios/index.ts` に登録
 3. `tests/` — `@playwright/test` の spec を書く
-4. `fixtures/demo-app/` — **削除する**（同梱のデモ対象アプリ）
+4. `fixtures/demo-app/` — **残す**（削除すると upstream merge 衝突を招くため。登録解除は fork 所有の `src/scenarios/index.ts` で行う）
 5. `BASE_URL` を対象システムに向ける
 
 ## 意図的に含めないもの
@@ -82,3 +82,17 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 認証、秘匿パラメータのマスク、リトライ、スケジューリング、動画記録。
 `params`（パスワード含む）は `runs/{runId}/result.json` に平文で残るため、
 共有環境では `runs/` のアクセス権を絞ること。
+
+## 開発運用(このテンプレートを開発する場合)
+
+本リポジトリは Issue → Draft PR → Codex 独立レビュー → ユーザー承認 → 実装 → Codex 最終レビュー →
+受け入れ → マージ の折衷フローで開発します。詳細は
+[`docs/operations/ai-workflow-policy.md`](docs/operations/ai-workflow-policy.md)、
+共通基準は [`docs/engineering-standards.md`](docs/engineering-standards.md) を参照してください。
+
+### fork 側での扱い(opt-out)
+
+`CLAUDE.md` / `AGENTS.md` / `docs/operations/ai-workflow-policy.md` などの運用ファイルは
+**upstream 所有・default-on** です。fork でこの運用を使わない場合は、これらを**削除・編集せず**
+(upstream merge 衝突を避けるため)、リポジトリ直下に fork 所有の **`FORK.md`** を作成して
+自システムの運用を記述してください。`FORK.md` があるとテンプレート運用指示は無効化されます。
