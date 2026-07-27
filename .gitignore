@@ -32,3 +32,4 @@ dist/
 runs/
 test-results/
 playwright-report/
+vendor/
