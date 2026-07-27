@@ -1,0 +1,33 @@
+# Example overlay: fork this directory (e.g. deploy/overlays/<your-system>)
+# and edit configmap.yaml / images / replicas below for your environment.
+#
+# The Route (route.yaml) is opt-in and lives only in overlays, never in base.
+# It is TLS-terminated but NOT authenticated by itself — see the warning
+# comment in route.yaml before applying this overlay to a real cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - route.yaml
+  - configmap.yaml
+
+images:
+  - name: playwright-api
+    newName: registry.example.internal/playwright-api
+    newTag: "1.0.0"
+
+# Example: override replica count for this environment.
+# Uncomment and adjust as needed.
+# replicas:
+#   - name: playwright-api
+#     count: 2
+
+patches:
+  - target:
+      kind: Deployment
+      name: playwright-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
