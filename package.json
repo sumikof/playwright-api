@@ -11,15 +11,15 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.8",
-    "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "^1.4.0",
     "hono": "^4.12.28",
-    "playwright": "^1.61.1",
+    "playwright": "1.61.1",
+    "swagger-ui-dist": "5.32.11",
     "ulid": "^3.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "1.61.1",
     "@types/node": "^20.11.17",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3",
