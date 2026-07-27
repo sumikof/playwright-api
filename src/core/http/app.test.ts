@@ -82,6 +82,25 @@ describe('createApp', () => {
     const res = await app.request('/health')
     expect(await res.json()).toEqual({ status: 'ok' })
   })
+
+  it('serves /ui without any external host URL and disables the validator', async () => {
+    const { app } = makeApp()
+    const res = await app.request('/ui')
+    const html = await res.text()
+    expect(res.status).toBe(200)
+    expect(html).not.toMatch(/https?:\/\/(?!localhost|127\.0\.0\.1)/) // 他ホスト URL 不在
+    expect(html).toContain('validatorUrl') // 初期化に validatorUrl 指定
+    expect(html).toMatch(/validatorUrl:\s*null/) // null で無効化
+    expect(html).not.toContain('jsdelivr')
+    expect(html).not.toContain('validator.swagger.io')
+  })
+
+  it('serves swagger-ui assets locally', async () => {
+    const { app } = makeApp()
+    const res = await app.request('/ui/assets/swagger-ui.css')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/css')
+  })
 })
 
 describe('queue-full 503', () => {
