@@ -1,0 +1,14 @@
+# Example overlay ConfigMap.
+#
+# フォーク先はこのディレクトリ (deploy/overlays/example) を
+# 自分のシステム名のディレクトリにコピーし、以下の値を実環境に合わせて
+# 編集すること (例: deploy/overlays/my-system/configmap.yaml)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: playwright-api-config
+  labels:
+    app: playwright-api
+data:
+  BASE_URL: "https://target.example.internal"
+  MAX_CONCURRENCY: "1"

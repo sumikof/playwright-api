@@ -11,6 +11,7 @@ const envSchema = z.object({
   RUNS_DIR: z.string().default('./runs'),
   RUN_RETENTION: z.coerce.number().int().positive().default(50),
   SCENARIO_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
+  BROWSER_LAUNCH_ARGS: z.string().default(''),
 })
 
 export interface Config {
@@ -24,6 +25,7 @@ export interface Config {
   runsDir: string
   runRetention: number
   scenarioTimeoutMs: number
+  browserLaunchArgs: string[]
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -43,5 +45,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     runsDir: e.RUNS_DIR,
     runRetention: e.RUN_RETENTION,
     scenarioTimeoutMs: e.SCENARIO_TIMEOUT_MS,
+    browserLaunchArgs: e.BROWSER_LAUNCH_ARGS.split(' ').map((s) => s.trim()).filter(Boolean),
   }
 }

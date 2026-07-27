@@ -61,9 +61,16 @@ swagger-ui アセットを読む HTML を返すため、オフラインでは `/
 - `/ui/assets/*` で `node_modules/swagger-ui-dist` の必要ファイル
   (`swagger-ui.css`, `swagger-ui-bundle.js`, `swagger-ui-standalone-preset.js`)を配信
 - `/ui` は自前の HTML を返し、上記ローカルアセットを参照する
+- **オンライン validator を無効化する**: `SwaggerUIBundle` の既定は
+  `validatorUrl: "https://validator.swagger.io/validator"` で、/ui を開くと spec を外部へ
+  POST する。初期化設定で **`validatorUrl: null` を必須**にし、外部通信を断つ
 - `@hono/swagger-ui` への依存は削除する
-- テスト: `/ui` の HTML に外部 URL(`http://`/`https://` の他ホスト)が含まれない
-  ことを検証するユニットテストを追加
+- テスト:
+  - `/ui` が返す HTML と初期化スクリプトに外部 URL(他ホストの `http://`/`https://`)が
+    含まれず、`validatorUrl: null` が設定されていることを検証するユニットテスト
+  - **(必須)** `/ui` をブラウザ(Playwright、既に依存にある)で実描画し、**外部ホストへの
+    ネットワーク要求がゼロ**であることを検証するテスト。HTML 静的検査だけでは bundle 実行時の
+    validator 通信を捕捉できないため、これを Phase 1 の必須テストとし §6 完了条件にも含める
 
 ### 2.2 ブラウザ起動オプションの外部化
 
@@ -74,6 +81,27 @@ OpenShift の任意 UID 実行では Chromium のサンドボックス(user name
 - `LocalBrowserProvider` が `launch({ headless, args })` に引き渡す
 - コンテナでの既定値は Dockerfile 側で `ENV BROWSER_LAUNCH_ARGS="--no-sandbox"` を設定
   (ローカル開発には影響しない)
+
+### 2.3 E2E テスト探索とデモ spec の分離(fork の test:e2e を汚さない)
+
+現状 `playwright.config.ts` は `testDir: './tests'` / `testMatch: '**/*.spec.ts'` で
+`tests/login.spec.ts`(デモ)を常に検出し、`baseURL` を `http://localhost:4321` に固定、
+`webServer` で demo-app を必ず起動する。`tests/` は fork 所有だが、サンプル spec を「残す」と
+fork の標準 `npm run test:e2e` がデモまで実行してしまう(API 側 `src/scenarios/index.ts` の
+登録解除は Playwright のテスト探索には無関係)。
+
+対応:
+
+- デモ E2E spec を**通常の testDir 外**へ移す(例: `examples/e2e/login.spec.ts`)、
+  または **opt-in の project** として分離し、既定の `npm run test:e2e` では実行しない。
+- `playwright.config.ts` を**環境変数駆動**にする: `BASE_URL`(既定はデモの
+  `http://localhost:4321`)を受け取り、`webServer` はデモ実行時のみ有効化(例: `BASE_URL`
+  未指定かつデモ project 選択時のみ demo-app を起動)。fork は自システムの `BASE_URL` を
+  与えて自分の spec だけを回せる。
+- 所有権上、`playwright.config.ts` はテンプレート所有だが fork の `BASE_URL` を尊重する
+  作りにする(§5 の所有権表と整合)。
+- テスト/検証: fork を想定し、`BASE_URL` を与えた `npm run test:e2e` がデモ spec・demo-app を
+  起動せず対象のみ実行することを確認する。
 
 ## 3. Dockerfile
 
@@ -126,13 +154,25 @@ deploy/
 ├── base/
 │   ├── kustomization.yaml
 │   ├── deployment.yaml
-│   ├── service.yaml
-│   └── route.yaml
+│   └── service.yaml         # ClusterIP のみ(外部公開は base に含めない)
 └── overlays/
     └── example/            # fork 後にシステム名へコピーして使う見本
         ├── kustomization.yaml   # イメージ名/タグ、replicas、リソース量の patch
-        └── configmap.yaml       # BASE_URL, MAX_CONCURRENCY 等の環境変数
+        ├── configmap.yaml       # BASE_URL, MAX_CONCURRENCY 等の環境変数
+        └── route.yaml           # 外部公開は overlay 側の opt-in(既定では公開しない)
 ```
+
+### Route(外部公開)を base から外す — 認証なし API の露出防止
+
+この API は**認証を持たない**(README 明記)うえ、実行時 params(パスワード等)が
+`result.json` に平文で保存され、成果物 API から取得できる。`route.yaml` を共通 base に含めて
+常時適用すると、Route に到達できる誰もがシナリオ実行や機密成果物取得を行えてしまう。
+
+- **base は ClusterIP Service まで**とし、`Route`(外部公開)は base に含めない。
+- 外部公開が必要な fork は overlay 側で `route.yaml` を **opt-in** し、少なくとも
+  **TLS 終端 + 外部認証プロキシ(または到達元制限)**を前提条件とする。overlay の見本には
+  「無認証のまま公開しない」旨と最小の保護例(`tls:`、到達制限の注記)を記載する。
+- `docs/deploy-openshift.md` に、公開する場合の必須保護(認証・TLS・到達制限)を明記する。
 
 ### deployment.yaml の要点
 
@@ -198,9 +238,9 @@ fork 側で削除するとテンプレート側の変更時に modify/delete 衝
 
 | Phase | 内容 | 完了条件 |
 |---|---|---|
-| 1. CDN 排除 | Swagger UI 自前配信、`BROWSER_LAUNCH_ARGS` 追加 | 既存テスト green + 新規テスト(外部 URL 不在、launch args 伝播) |
+| 1. CDN 排除 | Swagger UI 自前配信(`validatorUrl: null`)、`BROWSER_LAUNCH_ARGS` 追加、E2E 探索の env 駆動化(`BASE_URL`)+ デモ spec 分離 | 既存テスト green + 新規テスト(/ui HTML の外部 URL・validator 不在、**/ui 実描画で外部要求ゼロ(必須)**、launch args 伝播、`BASE_URL` 指定でデモを起動せず対象のみ実行) |
 | 2. Docker | `scripts/package-deps.sh`、Dockerfile、`.dockerignore`、`docs/offline-build.md` | ローカルで docker build 成功、コンテナ起動して `/health` と demo シナリオ実行が成功 |
-| 3. OpenShift | `deploy/base` + `deploy/overlays/example`、`docs/deploy-openshift.md` | `kustomize build` が妥当な YAML を出力(実クラスタ検証は持ち込み後) |
+| 3. OpenShift | `deploy/base`(Route 無し)+ `deploy/overlays/example`(Route は opt-in)、`docs/deploy-openshift.md` | `kustomize build` が妥当な YAML を出力。base に Route が含まれず、overlay で opt-in・保護前提が明記(実クラスタ検証は持ち込み後) |
 | 4. テンプレート運用 | `scripts/sync-upstream.sh`、README 更新(所有権表・fork 手順・削除方針変更) | スクリプトの動作確認(ローカルの bare repo を upstream に見立てたテスト) |
 
 ## 意図的にやらないこと(YAGNI)

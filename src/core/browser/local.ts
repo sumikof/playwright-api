@@ -7,11 +7,16 @@ const engines = { chromium, firefox, webkit }
 export class LocalBrowserProvider implements BrowserProvider {
   private browser: Browser | null = null
 
-  constructor(private readonly opts: { browser: 'chromium' | 'firefox' | 'webkit'; headless: boolean }) {}
+  constructor(
+    private readonly opts: { browser: 'chromium' | 'firefox' | 'webkit'; headless: boolean; launchArgs?: string[] },
+  ) {}
 
   private async ensureBrowser(): Promise<Browser> {
     if (this.browser && this.browser.isConnected()) return this.browser
-    this.browser = await engines[this.opts.browser].launch({ headless: this.opts.headless })
+    this.browser = await engines[this.opts.browser].launch({
+      headless: this.opts.headless,
+      args: this.opts.launchArgs ?? [],
+    })
     return this.browser
   }
 

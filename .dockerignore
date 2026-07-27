@@ -1,0 +1,7 @@
+node_modules
+runs
+test-results
+playwright-report
+dist
+.git
+vendor/playwright-base.tar

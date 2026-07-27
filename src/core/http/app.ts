@@ -1,10 +1,10 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
-import { swaggerUI } from '@hono/swagger-ui'
 import type { AnyScenario } from '../scenario.js'
 import type { RunService } from '../run/service.js'
 import { registerHealthRoute } from './routes/health.js'
 import { registerScenarioRoutes } from './routes/scenarios.js'
 import { registerArtifactRoute } from './routes/artifacts.js'
+import { registerSwaggerUI } from './routes/swagger-ui.js'
 
 export interface AppDeps {
   scenarios: AnyScenario[]
@@ -29,7 +29,7 @@ export function createApp(deps: AppDeps): OpenAPIHono {
     openapi: '3.0.0',
     info: { title: 'Playwright E2E API', version: '1.0.0' },
   })
-  app.get('/ui', swaggerUI({ url: '/doc' }))
+  registerSwaggerUI(app)
 
   return app
 }

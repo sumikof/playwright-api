@@ -1,0 +1,32 @@
+# Example overlay: fork this directory (e.g. deploy/overlays/<your-system>)
+# and edit configmap.yaml / images below for your environment.
+#
+# The Route (route.yaml) is opt-in and lives only in overlays, never in base.
+# It is TLS-terminated but NOT authenticated by itself — see the warning
+# comment in route.yaml before applying this overlay to a real cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  # 外部公開する場合のみ、TLS + 認証プロキシ/到達元制限を構成した上で route.yaml を resources に追加して有効化する（既定では公開しない）
+  - configmap.yaml
+
+images:
+  - name: playwright-api
+    newName: registry.example.internal/playwright-api
+    newTag: "1.0.0"
+
+# 重要: replicas は 1 固定(増やさないこと)。
+# 実行キューは Pod ごとにメモリ内、成果物(/app/runs)は Pod ごとの emptyDir のため、
+# 2 Pod 以上にすると POST を処理した Pod と別 Pod にポーリング/artifact GET が届いて
+# run が 404 になり API が壊れる(spec の「水平スケールは将来課題」を参照)。
+# 共有ストア + 分散キュー(または確実な同一 Pod ルーティング)を実装するまで単一レプリカ必須。
+patches:
+  - target:
+      kind: Deployment
+      name: playwright-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

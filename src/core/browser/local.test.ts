@@ -23,4 +23,11 @@ describe('LocalBrowserProvider', () => {
     await a.close()
     await b.close()
   })
+
+  it('passes launchArgs to browser launch', async () => {
+    const p = new LocalBrowserProvider({ browser: 'chromium', headless: true, launchArgs: ['--no-sandbox'] })
+    const ctx = await p.acquireContext()
+    await ctx.close()
+    await p.close()
+  })
 })

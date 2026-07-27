@@ -96,3 +96,61 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 **upstream 所有・default-on** です。fork でこの運用を使わない場合は、これらを**削除・編集せず**
 (upstream merge 衝突を避けるため)、リポジトリ直下に fork 所有の **`FORK.md`** を作成して
 自システムの運用を記述してください。`FORK.md` があるとテンプレート運用指示は無効化されます。
+
+## パス所有権(テンプレート運用)
+
+このリポジトリは「テンプレート + upstream merge」方式で運用する。fork(システムごとの複製)は
+テンプレート由来の共通修正を `git merge` で継続的に取り込む前提のため、どのパスをどちらが
+編集してよいかを以下のとおり定める。
+
+| 所有 | パス |
+|---|---|
+| テンプレート(共通)所有 | `src/core/`, `Dockerfile`, `.dockerignore`, `deploy/base/`, `scripts/`, `package.json`, `tsconfig.json`, `playwright.config.ts`, `vitest.config.ts`, `docs/` |
+| システム(fork 側)所有 | `src/pages/`, `src/scenarios/`, `tests/`, `deploy/overlays/<system>/` |
+| 共有(参照のみ・削除しない) | `fixtures/demo-app/`, サンプルの pages/scenarios/spec |
+
+ルール:
+
+- fork 側はテンプレート所有パスを**修正しない**。修正が必要な場合はテンプレートに PR を出し、
+  upstream merge で受け取る。
+- `package.json` はテンプレート所有だが、fork 固有の依存追加は許容する(衝突時は fork 側で
+  手動解決。頻度は低い想定)。
+- `fixtures/demo-app/` は**削除しない**(削除すると upstream merge で modify/delete 衝突が
+  発生するため)。サンプルシナリオの登録解除は fork 所有の `src/scenarios/index.ts` の編集で
+  行う(衝突しない)。
+
+### fork の共通部分取り込み手順
+
+```bash
+# 初回(fork 直後)
+git remote add upstream <社内Gitのテンプレートrepo URL>
+
+# 共通修正の取り込み(開発時。= fetch + merge upstream/main)
+scripts/sync-upstream.sh
+
+# リリース時は再現性のためタグを指定して merge
+scripts/sync-upstream.sh template-vX.Y.Z
+```
+
+`scripts/sync-upstream.sh` は upstream が未登録なら案内を表示して終了する。引数なしは
+`upstream/main` を、引数ありはそのタグ/ブランチを merge する。衝突した場合は上記の所有権表を
+参照し、テンプレート所有パスの変更は取り込み、fork 所有パスの変更は手動で解決すること。
+
+## E2E の実行方法(fork 視点)
+
+`playwright.config.ts` はテンプレート所有だが、`BASE_URL` 環境変数を尊重する作りになっている。
+
+```bash
+BASE_URL=<自システムのURL> npm run test:e2e
+```
+
+`BASE_URL` を指定すると `tests/`(fork 所有)配下の spec のみが実行され、demo-app の起動や
+デモ spec の実行は行われない。デモ spec は `examples/e2e/` に分離されており、`BASE_URL` 未指定
+(=デフォルトの `npm run test:e2e`)のときだけ demo-app を起動して実行される。
+
+## オフライン/デプロイ
+
+- オフライン環境向けの Docker ビルド手順(バージョン整合の原則、`vendor/` への持ち込み方法など)は
+  [`docs/offline-build.md`](docs/offline-build.md) を参照。
+- OpenShift(rootless / restricted-v2 SCC)へのデプロイ手順は
+  [`docs/deploy-openshift.md`](docs/deploy-openshift.md) を参照。

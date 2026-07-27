@@ -12,5 +12,9 @@ export function createBrowserProvider(config: Config): BrowserProvider {
   if (config.browserWsEndpoint) {
     return new RemoteBrowserProvider(config.browserWsEndpoint)
   }
-  return new LocalBrowserProvider({ browser: config.browser, headless: config.headless })
+  return new LocalBrowserProvider({
+    browser: config.browser,
+    headless: config.headless,
+    launchArgs: config.browserLaunchArgs,
+  })
 }
