@@ -1,5 +1,5 @@
 # Example overlay: fork this directory (e.g. deploy/overlays/<your-system>)
-# and edit configmap.yaml / images / replicas below for your environment.
+# and edit configmap.yaml / images below for your environment.
 #
 # The Route (route.yaml) is opt-in and lives only in overlays, never in base.
 # It is TLS-terminated but NOT authenticated by itself — see the warning
@@ -17,12 +17,11 @@ images:
     newName: registry.example.internal/playwright-api
     newTag: "1.0.0"
 
-# Example: override replica count for this environment.
-# Uncomment and adjust as needed.
-# replicas:
-#   - name: playwright-api
-#     count: 2
-
+# 重要: replicas は 1 固定(増やさないこと)。
+# 実行キューは Pod ごとにメモリ内、成果物(/app/runs)は Pod ごとの emptyDir のため、
+# 2 Pod 以上にすると POST を処理した Pod と別 Pod にポーリング/artifact GET が届いて
+# run が 404 になり API が壊れる(spec の「水平スケールは将来課題」を参照)。
+# 共有ストア + 分散キュー(または確実な同一 Pod ルーティング)を実装するまで単一レプリカ必須。
 patches:
   - target:
       kind: Deployment
