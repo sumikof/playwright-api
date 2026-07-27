@@ -5,22 +5,20 @@ if ! git remote | grep -qx upstream; then
   echo "  git remote add upstream <社内Gitのテンプレートrepo URL>"
   exit 1
 fi
-git fetch upstream --tags
-if [ $# -ge 1 ]; then
-  if git rev-parse -q --verify "upstream/$1" >/dev/null; then
-    TARGET="upstream/$1"                                    # upstream のブランチ
-  elif git ls-remote --exit-code --tags upstream "refs/tags/$1" >/dev/null 2>&1; then
-    TARGET="refs/tags/$1"                                   # upstream のタグ(存在を確認済み)
-  else
-    # ローカルの同名 ref / SHA / 別 remote 由来の ref は許可しない(upstream に無ければ失敗させる)
-    echo "ref '$1' が upstream に見つかりません（ブランチ=upstream/$1、タグ=$1 のいずれも不在）"
-    exit 1
-  fi
+# 取り込む ref は必ず upstream 上に存在することを ls-remote で確認し、その ref だけを
+# 明示 fetch して FETCH_HEAD を merge する。ローカルの同名ブランチ・古い remote-tracking
+# ref・SHA などを誤って取り込まないため、ローカル ref には一切依存しない。
+REF="${1:-main}"
+if git ls-remote --exit-code --heads upstream "refs/heads/${REF}" >/dev/null 2>&1; then
+  git fetch upstream "refs/heads/${REF}"                    # upstream のブランチ(確認済み)
+elif git ls-remote --exit-code --tags upstream "refs/tags/${REF}" >/dev/null 2>&1; then
+  git fetch upstream "refs/tags/${REF}"                     # upstream のタグ(確認済み)
 else
-  TARGET="upstream/main"
+  echo "ref '${REF}' が upstream に見つかりません（ブランチ・タグのいずれも不在）"
+  exit 1
 fi
-echo "merging ${TARGET} ..."
-if ! git merge "${TARGET}"; then
+echo "merging upstream ${REF} (FETCH_HEAD) ..."
+if ! git merge FETCH_HEAD; then
   echo "衝突しました。所有権表は docs（README の所有権表）を参照して手動解決してください。"
   echo "テンプレート所有パスは原則 fork 側で編集しません。"
   exit 1
