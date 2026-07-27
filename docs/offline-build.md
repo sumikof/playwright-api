@@ -208,9 +208,17 @@ bash scripts/package-deps.sh
 - 更新された `package.json`
 
 **ステップ 4**: オフライン環境でビルド
+
+`Dockerfile` の既定 `BASE_IMAGE` は旧バージョン(`v1.61.1-noble`)のため、更新後は
+**新しいベースイメージを明示指定**する(または `Dockerfile` の `ARG BASE_IMAGE` 既定値を更新する)。
+指定しないと旧イメージ前提でビルドされ、オフライン環境ではビルド失敗、または npm 版とブラウザ版の
+不一致を招く。
+
 ```bash
 docker load -i vendor/playwright-base.tar
-docker build -t playwright-api:1.62.0 .
+docker build \
+  --build-arg BASE_IMAGE=mcr.microsoft.com/playwright:v1.62.0-noble \
+  -t playwright-api:1.62.0 .
 ```
 
 ### 5.2 バージョン一覧
