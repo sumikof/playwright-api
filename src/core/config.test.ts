@@ -23,4 +23,14 @@ describe('loadConfig', () => {
     expect(cfg.headless).toBe(false)
     expect(cfg.maxConcurrency).toBe(3)
   })
+
+  it('parses BROWSER_LAUNCH_ARGS into an args array', () => {
+    const cfg = loadConfig({ BASE_URL: 'http://x', BROWSER_LAUNCH_ARGS: '--no-sandbox --disable-gpu' })
+    expect(cfg.browserLaunchArgs).toEqual(['--no-sandbox', '--disable-gpu'])
+  })
+
+  it('defaults BROWSER_LAUNCH_ARGS to an empty array', () => {
+    const cfg = loadConfig({ BASE_URL: 'http://x' })
+    expect(cfg.browserLaunchArgs).toEqual([])
+  })
 })
