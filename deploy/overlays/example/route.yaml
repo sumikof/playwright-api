@@ -7,6 +7,9 @@
 #
 # Route はこの example overlay でのみ opt-in で有効化される。
 # base には含めないこと。
+# 既定ではこの overlay の kustomization.yaml の resources には含まれていない
+# （= Route は作成されない）。TLS + 認証プロキシ/到達元制限を構成した後、
+# kustomization.yaml の resources に route.yaml を追加してのみ有効化すること。
 # ------------------------------------------------------------------
 apiVersion: route.openshift.io/v1
 kind: Route

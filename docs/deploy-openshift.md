@@ -104,6 +104,8 @@ oc logs -l app=playwright-api
 
 `deploy/base/` には Route が含まれていません。Route を公開するかどうかは、各 overlay での判断に委ねられています。
 
+さらに、`deploy/overlays/example/` の `kustomization.yaml` は **既定では `route.yaml` を `resources` に含めていません**。`oc apply -k` を実行しても Route は作成されず、公開されない状態が既定です。Route を有効化する場合は、下記「Route を公開する場合の必須保護」に従って TLS・認証プロキシ・到達元制限を先に構成してから、`kustomization.yaml` の `resources` に `route.yaml` を追加し、`oc apply -k` を再実行してください。
+
 ### 公開しない運用も選択可能
 
 この API は**無認証**です。外部に公開する場合には強力なセキュリティ対策が必須です。公開しない運用（以下のいずれか）も有効な選択肢です：

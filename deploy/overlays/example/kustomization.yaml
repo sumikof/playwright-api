@@ -9,7 +9,7 @@ kind: Kustomization
 
 resources:
   - ../../base
-  - route.yaml
+  # 外部公開する場合のみ、TLS + 認証プロキシ/到達元制限を構成した上で route.yaml を resources に追加して有効化する（既定では公開しない）
   - configmap.yaml
 
 images:
