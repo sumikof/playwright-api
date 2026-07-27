@@ -190,7 +190,17 @@ Playwright を新しいバージョンにアップグレードする場合、以
 }
 ```
 
-**ステップ 2**: インターネット接続のある環境で再度パッケージング
+**ステップ 1.5**: `package-lock.json` を更新してコミット
+
+`package.json` だけを変更すると、`scripts/package-deps.sh` の `npm ci` は lockfile 不整合で
+エラー終了する(`npm ci` は package.json と package-lock.json が一致しないと lockfile を
+更新せず失敗する)。インターネット接続のある環境で lockfile を先に更新し、コミットする:
+```bash
+npm install --package-lock-only   # package-lock.json を package.json に整合させる
+git add package.json package-lock.json && git commit -m "build: bump playwright to 1.62.0"
+```
+
+**ステップ 2**: インターネット接続のある環境で再度パッケージング(`npm ci` は更新済み lockfile を使う)
 ```bash
 bash scripts/package-deps.sh
 ```
@@ -237,6 +247,7 @@ docker build \
 
 - [ ] `package.json` の `playwright` バージョンを更新
 - [ ] `package.json` の `@playwright/test` バージョンを更新
+- [ ] `npm install --package-lock-only` で `package-lock.json` を更新しコミット(`npm ci` 前提)
 - [ ] `Dockerfile` の `BASE_IMAGE` を新しいバージョンに更新（またはビルド時に `--build-arg` で指定）
 - [ ] インターネット環境で `bash scripts/package-deps.sh` を実行
 - [ ] 新しい `vendor/node_modules.tar.gz` と `vendor/playwright-base.tar` を確認
