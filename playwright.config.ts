@@ -6,7 +6,12 @@ const useDemo = !process.env.BASE_URL // BASE_URL 未指定時のみデモを起
 
 export default defineConfig({
   timeout: 60000,
-  use: { baseURL },
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    baseURL,
+    screenshot: 'only-on-failure',
+    trace: 'on-first-retry',
+  },
   // デモ spec は projects の opt-in。BASE_URL 未指定時のみデモ project を追加
   projects: [
     { name: 'default', testDir: './tests', testMatch: '**/*.spec.ts' },
