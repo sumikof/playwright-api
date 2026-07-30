@@ -1,8 +1,6 @@
-import type { Page } from 'playwright'
+import { BasePage } from '../core/page.js'
 
-export class ProductListPage {
-  constructor(private readonly page: Page) {}
-
+export class ProductListPage extends BasePage {
   private readonly heading = () => this.page.getByRole('heading', { name: '商品一覧' })
   private readonly userNameLocator = () => this.page.getByTestId('user-name')
 

@@ -1,8 +1,6 @@
-import type { Page } from 'playwright'
+import { BasePage } from '../core/page.js'
 
-export class LoginPage {
-  constructor(private readonly page: Page) {}
-
+export class LoginPage extends BasePage {
   private readonly email = () => this.page.getByLabel('メールアドレス')
   private readonly password = () => this.page.getByLabel('パスワード')
   private readonly submitButton = () => this.page.getByRole('button', { name: 'ログイン' })
