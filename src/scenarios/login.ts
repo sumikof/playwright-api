@@ -16,11 +16,11 @@ export const loginScenario = defineScenario({
   }),
 
   async run(ctx, params) {
-    const login = new LoginPage(ctx.page)
+    const login = new LoginPage(ctx)
     await ctx.step('ログイン画面を開く', () => login.goto())
     await ctx.step('資格情報を送信', () => login.submit(params.email, params.password))
 
-    const list = new ProductListPage(ctx.page)
+    const list = new ProductListPage(ctx)
     await ctx.step('商品一覧の表示を確認', () => list.expectLoaded())
     await ctx.screenshot('product-list')
 
