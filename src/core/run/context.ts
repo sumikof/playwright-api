@@ -8,16 +8,22 @@ function errMessage(e: unknown): string {
 }
 
 export class ApiScenarioContext implements ScenarioContext {
-  readonly steps: StepResult[] = []
-  readonly artifacts: Artifact[] = []
-  private screenshotIndex = 0
+  readonly steps: StepResult[]
+  readonly artifacts: Artifact[]
+  // 親子コンテキスト間でスクリーンショット連番を共有するため参照型で持つ
+  private readonly counter: { screenshotIndex: number }
 
   constructor(
     readonly page: Page,
     readonly baseURL: string,
     private readonly runDir: string,
     private readonly runId: string,
-  ) {}
+    parent?: ApiScenarioContext,
+  ) {
+    this.steps = parent?.steps ?? []
+    this.artifacts = parent?.artifacts ?? []
+    this.counter = parent?.counter ?? { screenshotIndex: 0 }
+  }
 
   async step<T>(name: string, fn: () => Promise<T>): Promise<T> {
     const start = Date.now()
@@ -32,13 +38,22 @@ export class ApiScenarioContext implements ScenarioContext {
   }
 
   async screenshot(name: string): Promise<void> {
-    this.screenshotIndex++
-    const fileName = `${String(this.screenshotIndex).padStart(2, '0')}-${name}.png`
+    this.counter.screenshotIndex++
+    const fileName = `${String(this.counter.screenshotIndex).padStart(2, '0')}-${name}.png`
     await this.page.screenshot({ path: join(this.runDir, fileName), fullPage: true })
     this.artifacts.push({
       kind: 'screenshot',
       name: fileName,
       url: `/runs/${this.runId}/artifacts/${fileName}`,
     })
+  }
+
+  async waitForPopup(trigger: () => Promise<void>): Promise<ApiScenarioContext> {
+    const [popup] = await Promise.all([
+      this.page.waitForEvent('popup'),
+      trigger(),
+    ])
+    await popup.waitForLoadState()
+    return new ApiScenarioContext(popup, this.baseURL, this.runDir, this.runId, this)
   }
 }

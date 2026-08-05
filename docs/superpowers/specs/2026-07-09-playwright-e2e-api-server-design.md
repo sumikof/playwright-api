@@ -171,10 +171,13 @@ interface ScenarioContext {
   readonly baseURL: string
   step<T>(name: string, fn: () => Promise<T>): Promise<T>
   screenshot(name: string): Promise<void>
+  waitForPopup(trigger: () => Promise<void>): Promise<ScenarioContext>
 }
 ```
 
-`ctx` はこの4つだけを公開する。`browser` や `browserContext` は渡さない。シナリオが自前でコンテキストを作れてしまうと、runnerによるtrace取得とクリーンアップが効かなくなるため。
+`ctx` はこの5つだけを公開する。`browser` や `browserContext` は渡さない。シナリオが自前でコンテキストを作れてしまうと、runnerによるtrace取得とクリーンアップが効かなくなるため。
+
+`waitForPopup` は `target="_blank"` や `window.open` で開く新規タブへの対応。Playwrightでは新規タブは同一 `BrowserContext` 内の新しい `Page` として生まれるため、新しいブラウザコンテキストは作らない(作るとセッションが共有されず実挙動と乖離する)。返り値は新規タブを `page` に持つ子コンテキストで、ステップ・スクリーンショット連番・アーティファクトの記録は親と共有される。popupイベントはトリガー操作より先に待ち受けを開始しないと取り逃すため、トリガーはクロージャで受け取る設計とし、利用側が待ち受け順序を意識しなくてよいようにしている。新規タブ用のPage Objectは子コンテキストを渡して構築すれば、`BasePage` は無変更でそのまま使える。
 
 実装は2つある。
 

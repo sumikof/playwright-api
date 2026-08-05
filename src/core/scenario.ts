@@ -6,6 +6,13 @@ export interface ScenarioContext {
   readonly baseURL: string
   step<T>(name: string, fn: () => Promise<T>): Promise<T>
   screenshot(name: string): Promise<void>
+  /**
+   * trigger の実行中に開かれる新規タブ(popup)を待ち受け、そのタブを操作対象と
+   * する子コンテキストを返す。ステップ・スクリーンショットの記録は親と共有される。
+   * popup イベントは trigger より先に待ち受けを開始しないと取り逃すため、
+   * トリガー操作はクロージャで受け取る。
+   */
+  waitForPopup(trigger: () => Promise<void>): Promise<ScenarioContext>
 }
 
 export interface Scenario<
