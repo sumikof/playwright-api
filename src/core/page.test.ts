@@ -16,6 +16,10 @@ function makeContext(): { ctx: ScenarioContext; steps: string[]; screenshots: st
     async screenshot(name) {
       screenshots.push(name)
     },
+    async waitForPopup(trigger) {
+      await trigger()
+      return ctx
+    },
   }
   return { ctx, steps, screenshots }
 }

@@ -41,6 +41,45 @@ describe('ApiScenarioContext', () => {
     await context.close()
   })
 
+  it('waitForPopup returns a child context targeting the new tab', async () => {
+    const context = await provider.acquireContext()
+    const page = await context.newPage()
+    await page.setContent('<a href="about:blank" target="_blank">open</a>')
+    const runDir = join(dir, 'R4')
+    await mkdir(runDir, { recursive: true })
+    const ctx = new ApiScenarioContext(page, 'http://x.test', runDir, 'R4')
+
+    const popupCtx = await ctx.waitForPopup(() => page.click('a'))
+    expect(popupCtx.page).not.toBe(page)
+    expect(popupCtx.baseURL).toBe('http://x.test')
+    await context.close()
+  })
+
+  it('waitForPopup child shares steps, artifacts and screenshot numbering', async () => {
+    const context = await provider.acquireContext()
+    const page = await context.newPage()
+    await page.setContent('<a href="about:blank" target="_blank">open</a>')
+    const runDir = join(dir, 'R5')
+    await mkdir(runDir, { recursive: true })
+    const ctx = new ApiScenarioContext(page, 'http://x.test', runDir, 'R5')
+
+    const popupCtx = await ctx.waitForPopup(() => page.click('a'))
+    await popupCtx.page.setContent('<h1>popup</h1>')
+
+    await ctx.screenshot('parent')
+    await popupCtx.screenshot('popup')
+    await popupCtx.step('in-popup', async () => 1)
+
+    // 連番は親子で連続し、記録はすべて親の配列に集約される
+    const files = await readdir(runDir)
+    expect(files).toContain('01-parent.png')
+    expect(files).toContain('02-popup.png')
+    expect(ctx.steps).toHaveLength(1)
+    expect(ctx.steps[0]).toMatchObject({ name: 'in-popup', status: 'passed' })
+    expect(ctx.artifacts.map((a) => a.name)).toEqual(['01-parent.png', '02-popup.png'])
+    await context.close()
+  })
+
   it('writes flat numbered screenshots and records artifacts', async () => {
     const context = await provider.acquireContext()
     const page = await context.newPage()
