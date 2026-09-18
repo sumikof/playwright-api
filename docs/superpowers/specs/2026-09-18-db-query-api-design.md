@@ -161,7 +161,7 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 
 ### OracleProvider(本番用)
 
-- **`oracledb`(node-oracledb)6.x の Thin モード**を使う。Thin モードは pure JavaScript で
+- **`oracledb`(node-oracledb)の Thin モード**を使う。Thin モードは pure JavaScript で
   Oracle Instant Client を必要とせず、ベースイメージ(Playwright 公式 noble)に何も足さずに動く。
   `npm ci` → `tar.gz` のオフライン手順もそのまま使える。
 - 接続プール(`oracledb.createPool`)を起動時に作る。`poolMin=0`, `poolMax=DB_POOL_MAX`(既定 `2`)。
@@ -171,8 +171,12 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
   `execute(sql, binds, { outFormat: OBJECT })` → `close()`。`callTimeout` 超過は `504` に写像する。
 - 読み取り専用は **DB ユーザーの権限で担保**する(SELECT 権限のみのアカウントを用意する旨を
   ドキュメントに書く)。`autoCommit` は既定の `false` のまま、コミットは呼ばない。
-- Thin モードの対応 DB は Oracle Database 12.1 以降。それより古い DB はサポート外(Thick モードへの
-  切替は「意図的に含めないもの」参照)。
+- **バージョンと対応 DB**(2026-09-18 時点の npm 最新は `oracledb@7.0.1`、6 系最新は `6.10.0`):
+  - `^7` — Oracle Database **19c 以降**のみ(19 未満との接続は 6.10 で非推奨、7.0 で削除)。
+  - `^6.10` — Oracle Database 12.1 以降(19 未満は非推奨扱いだが接続可)。
+  - 本 spec は **`^7` を採用し、対象 DB は 19c 以降を前提**とする。対象システムの Oracle が
+    19c 未満の場合は `^6.10` に固定して採用する(未決事項 1)。いずれも Thin モードが既定で、
+    Thick モードへの切替は「意図的に含めないもの」参照。
 - 本テンプレートの CI・devcontainer には Oracle が無いため、`OracleProvider` の自動テストは
   `oracledb` モジュールをモックした単体テスト(バインドの受け渡し・`callTimeout` の設定・
   `close()` の保証)に留め、実 DB での動作確認はユーザー環境で行う(受け入れ条件参照)。
@@ -274,8 +278,8 @@ fixtures/demo-db/    ← 共有(削除しない)
   だが、本 spec では API を確立するに留め、`ScenarioContext` への露出は別 spec で扱う
   (`DbProvider` は再利用できる形にしておく)。
 - **複数 DB / 複数方言の同時接続**。
-- **Oracle Thick モード**(Instant Client 同梱)。12.1 未満の DB や Thick 限定機能が必要になった
-  ときに個別対応する。
+- **Oracle Thick モード**(Instant Client 同梱)。Thin モードの対応範囲外の DB や Thick 限定機能が
+  必要になったときに個別対応する。
 - **ページング・ストリーミング**。大量行はクエリ側で絞る(`FETCH FIRST n ROWS ONLY` 等)。
 - **結果のキャッシュ・保存**。`runs/` には残さない(DB 内容の平文コピーを増やさない)。
 - **認証**。既存方針どおり(OpenShift では Route を opt-in にし、ネットワークで守る)。
@@ -285,8 +289,8 @@ fixtures/demo-db/    ← 共有(削除しない)
 
 | パッケージ | 種別 | 理由 |
 |---|---|---|
-| `oracledb` `^6.x` | dependencies | Oracle 接続(Thin モード、pure JS) |
-| `@types/node` `^22` | devDependencies(更新) | `node:sqlite` の型定義 |
+| `oracledb` `^7` (7.0.1) | dependencies | Oracle 接続(Thin モード、pure JS)。対象 DB が 19c 未満なら `^6.10` |
+| `@types/node` `^22` (22.20.3) | devDependencies(更新) | `node:sqlite` の型定義。ランタイム基準(Node 24)に合わせ `^24` (24.13.5) でも可 |
 
 `node:sqlite` は Node 組み込みのため依存追加なし。固定バージョン方針(`docs/engineering-standards.md`)は
 Playwright にのみ適用されており、`oracledb` はキャレット付きで良い(Docker イメージタグとの整合
@@ -294,7 +298,8 @@ Playwright にのみ適用されており、`oracledb` はキャレット付き�
 
 ## 未決事項
 
-1. Oracle Database のバージョンが 12.1 以上か(Thin モードの前提)
+1. 対象システムの Oracle Database のバージョン。**19c 以降なら `oracledb ^7`**、12.1〜18c なら
+   `^6.10` を採用する(Thin モードの対応範囲)
 2. Playwright `v1.61.1-noble` イメージ同梱の Node バージョン(22.13 以上か)。実装時に確認し、
    満たさなければ設計レビューへ戻す
 3. `ctx.db` としてシナリオへ露出するかは別 spec(本 spec では対象外と明記)
