@@ -131,9 +131,13 @@ export interface QueryDefinition<P extends z.ZodType, R extends z.ZodType> {
 fork 側のクエリが絞り込みを忘れた場合に、全行をドライバで配列化 → Zod 検証 → JSON 化して
 Pod のメモリ上限を超えるのを防ぐため、**行数上限をテンプレート側で必ず強制する**。
 
-- 上限は `min(定義の maxRows, DB_MAX_ROWS)`。既定 `DB_MAX_ROWS=1000`。定義で `DB_MAX_ROWS` より
-  大きい値を指定した場合は `buildQueryRegistry` が起動時に落とす(設定側の上限を定義で
-  迂回できない)。
+- 上限は `min(定義の maxRows, DB_MAX_ROWS)`。既定 `DB_MAX_ROWS=1000`。
+- **どちらも正の有限整数に限る**。`DB_MAX_ROWS` は `config.ts` の zod で
+  `z.coerce.number().int().positive()`(既存の `MAX_QUEUE` 等と同じ)、定義の `maxRows` は
+  `buildQueryRegistry` で `Number.isSafeInteger(v) && v > 0` を検査する。`0`・負数・小数・`NaN`・
+  `Infinity` は起動時エラー(ドライバエラーや「全クエリが上限超過」を実行時まで持ち越さない)。
+- 定義で `DB_MAX_ROWS` より大きい値を指定した場合も `buildQueryRegistry` が起動時に落とす
+  (設定側の上限を定義で迂回できない)。
 - Provider は **`maxRows + 1` 件まで**しか取得しない(Oracle は `execute` の `maxRows` オプション、
   SQLite は `iterate()` を `maxRows + 1` 件で打ち切る)。`maxRows + 1` 件目が存在したら
   **`500` `{ error: { message: "row limit exceeded (maxRows=N)" } }`** を返し、行は返さない
@@ -141,7 +145,8 @@ Pod のメモリ上限を超えるのを防ぐため、**行数上限をテン�
 - 上限に収めるのはクエリ側の責務(`WHERE` で絞る、`FETCH FIRST n ROWS ONLY` を書く)。
   ページングは引き続き対象外。
 - テスト: SQLite で `maxRows` ちょうどは `200`、`maxRows + 1` 行あると `500`、定義の `maxRows` が
-  `DB_MAX_ROWS` を超えると起動時エラー。
+  `DB_MAX_ROWS` を超える・`0`・負数・小数・`NaN` のいずれも起動時エラー。`DB_MAX_ROWS=0` /
+  `abc` / `1.5` で `loadConfig` が落ちる。
 
 ### レジストリ
 
@@ -150,7 +155,7 @@ Pod のメモリ上限を超えるのを防ぐため、**行数上限をテン�
 - SQL がコメント・空白を除いて `SELECT` または `WITH` で始まること(読み取り専用の意思表示。
   Oracle 側の権限で本来担保するが、定義ミスを起動時に検出する)
 - 前述のバインド名と `params` キーの整合
-- 定義の `maxRows` が `DB_MAX_ROWS` 以下であること
+- 定義の `maxRows` が正の有限整数かつ `DB_MAX_ROWS` 以下であること
 
 ## DbProvider 抽象
 
@@ -166,6 +171,27 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 ```
 
 `BrowserProvider` と同じ「起動時に1つ作り、ルートに注入し、shutdown で閉じる」形にする。
+
+### シャットダウン時の drain
+
+既存の `src/index.ts` の shutdown は `server.close()` → `queue.drain()`(上限 30 秒)→
+`provider.close()` の順で、ブラウザジョブしか待たない。DB クエリの実行中に SIGTERM を受けると、
+使用中の Oracle 接続を切るか `pool.close()` が失敗して処理中の HTTP 応答が失われるため、
+次のとおり `DbProvider.close()` に drain を組み込む。
+
+- `OracleProvider.close()` は **`pool.close(DB_SHUTDOWN_DRAIN_S)`**(既定 `10` 秒)を呼ぶ。
+  node-oracledb はこの間、新規 `getConnection()` を拒否しつつ使用中の接続の継続を許し、経過後に
+  強制クローズする(公式ドキュメントの `drainTime` の挙動)。実行中クエリは
+  `DB_QUERY_TIMEOUT_MS` で必ず終わるため、実効的な待ち時間は `min(DB_SHUTDOWN_DRAIN_S,
+  残クエリ時間)`。active-query カウンタは持たない(プールの drain で足りる)。
+- `SqliteProvider.close()` は `db.close()` のみ。実行が同期のため、`await` をまたぐ処理中クエリは
+  存在しない。
+- `src/index.ts` の shutdown 順序は `server.close()` → `queue.drain()` → `provider.close()` →
+  **`db?.close()`** → `process.exit(0)`。DB の drain はブラウザの drain と並行させず直列にする
+  (合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒。OpenShift の `terminationGracePeriodSeconds` を
+  それ以上にする旨を `docs/deploy-openshift.md` に書く)。
+- テスト(`oracledb` モック): `close()` が `pool.close(drainTime)` を `DB_SHUTDOWN_DRAIN_S` で
+  呼ぶこと、`close()` 後の `query()` が `503` 相当のエラーになること。
 
 ### SqliteProvider(開発用)
 
@@ -199,13 +225,29 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 - **接続取得から実行完了までを単一の期限(deadline = 開始時刻 + `DB_QUERY_TIMEOUT_MS`)で管理**する。
   - プール作成時に `queueTimeout = DB_QUERY_TIMEOUT_MS` を設定する(`poolMax` を使い切った状態での
     `pool.getConnection()` 待ちがこの時間で `NJS-040` として失敗する。既定の 60 秒のままにしない)。
-  - クエリごとに `pool.getConnection()` → `connection.callTimeout = deadline - now`(残り時間。
-    0 以下なら実行せずタイムアウト扱い)→ `execute(sql, binds, { outFormat: OBJECT, maxRows })`
-    → `close()`(`finally` で必ず返却)。
-  - プール待ちのタイムアウト(`NJS-040`)と `callTimeout` 超過(`NJS-123` / `DPI-1067` 相当)は
-    どちらも `504` に写像する。それ以外の DB エラーは `500`。
-  - テスト(`oracledb` モック): `poolMax` 飽和時に後続リクエストが `DB_QUERY_TIMEOUT_MS` 以内に
-    `504` で返ること、および `callTimeout` が残り時間で設定されることを確認する。
+  - クエリごとに `pool.getConnection()` → 残り時間 `remaining = deadline - now` を計算(0 以下なら
+    実行せずタイムアウト扱い)→ `execute(sql, binds, { outFormat: OBJECT, maxRows: limit + 1,
+    fetchArraySize: limit + 1 })` → `close()`(`finally` で必ず返却)。
+    **ドライバに渡す `maxRows` は必ず論理上限 `limit` に 1 を足した値**とする。node-oracledb の
+    `maxRows` は超過分を黙って切り詰める(公式ドキュメント: "The number of rows returned is
+    limited by maxRows")ため、`limit` をそのまま渡すと `limit + 1` 件目を観測できず、欠落した
+    結果を `200` で返してしまう。返却行数が `limit` を超えていれば `RowLimitExceededError`。
+  - **期限の強制は Provider 側の外側タイマーで行う**。`callTimeout` は「各往復に個別に適用され、
+    往復の合計には適用されない」(公式ドキュメント)ため、単一期限の契約を満たす手段にならない。
+    `execute` を `remaining` ミリ秒のタイマーと `Promise.race` し、期限到来時は
+    `connection.break()` で実行中の文を中断してから接続を返却し、`504` を返す。`break()` が
+    効かず `execute` が戻らない場合に備え、接続の返却は `connection.close({ drop: true })` で
+    プールから破棄する。`callTimeout = remaining` も併せて設定するが、これは往復単位の
+    防御(defense in depth)であり、契約の根拠にはしない。
+  - プール待ちのタイムアウト(`NJS-040`)、外側タイマーの期限到来、`callTimeout` 超過はいずれも
+    `504` に写像する。それ以外の DB エラーは `500`。
+  - テスト(`oracledb` モック):
+    - `poolMax` 飽和時に後続リクエストが `DB_QUERY_TIMEOUT_MS` 以内に `504` で返ること
+    - `execute` に `maxRows: limit + 1` が渡され、`limit + 1` 行返ると `RowLimitExceededError`
+      (→ `500`)、`limit` 行ちょうどなら成功すること
+    - `execute` が個々の往復では `callTimeout` 未満だが合計で期限を超える(モックで `execute` の
+      解決を `remaining` より遅らせる)場合に、期限で `break()` が呼ばれ `504` になること
+    - `callTimeout` が残り時間で設定されること
 - 読み取り専用は **DB ユーザーの権限で担保**する(SELECT 権限のみのアカウントを用意する旨を
   ドキュメントに書く)。`autoCommit` は既定の `false` のまま、コミットは呼ばない。
 - **バージョンと対応 DB**(2026-09-18 時点の npm 最新は `oracledb@7.0.1`、6 系最新は `6.10.0`):
@@ -233,7 +275,8 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 | `DB_ORACLE_CONNECT_STRING` | (oracle 時必須) | `host:port/service_name` 形式の Easy Connect 文字列 |
 | `DB_POOL_MAX` | `2` | Oracle 接続プール上限 |
 | `DB_QUERY_TIMEOUT_MS` | `30000` | 1クエリの上限。接続プール待ち + 実行の合計(Oracle のみ有効) |
-| `DB_MAX_ROWS` | `1000` | 1クエリが返せる最大行数。超過は `500`。定義の `maxRows` はこれ以下に限る |
+| `DB_MAX_ROWS` | `1000` | 1クエリが返せる最大行数(正の整数)。超過は `500`。定義の `maxRows` はこれ以下に限る |
+| `DB_SHUTDOWN_DRAIN_S` | `10` | 終了時に使用中の Oracle 接続の完了を待つ秒数(`pool.close(drainTime)`) |
 
 `config.ts` の zod スキーマで **方言ごとの必須項目を条件付きで検証**する(`DB_DIALECT=oracle`
 なのに `DB_ORACLE_USER` が無い、は起動時に落とす)。`DB_DIALECT` 未設定は正常(DB を使わない
@@ -292,8 +335,9 @@ fixtures/demo-db/    ← 共有(削除しない)
 | 対象 | 方法 |
 |---|---|
 | `SqliteProvider` | `seedSqlite()` で一時ファイルを作り readOnly で開く。バインド・0件・SQL エラー・書き込み拒否・`maxRows + 1` 行で `RowLimitExceededError` を確認 |
-| `buildQueryRegistry` | id 重複、非 SELECT 文、バインド名と `params` の不整合、`maxRows > DB_MAX_ROWS` を起動時に落とす |
-| `OracleProvider` | `oracledb` をモックし、pool 取得 → 残り時間で `callTimeout` 設定 → `execute(maxRows)` → close(`finally`)の順序、`NJS-040` / `callTimeout` の `504` 写像、`poolMax` 飽和時に上限時間内で `504` になることを確認 |
+| `buildQueryRegistry` | id 重複、非 SELECT 文、バインド名と `params` の不整合、`maxRows` が非正・非整数・`NaN`・`DB_MAX_ROWS` 超過、を起動時に落とす |
+| `config` | `DB_MAX_ROWS` / `DB_SHUTDOWN_DRAIN_S` の無効値(`0`、負数、小数、文字列)で `loadConfig` が落ちる |
+| `OracleProvider` | `oracledb` をモックし、pool 取得 → `callTimeout` 設定 → `execute(maxRows: limit + 1)` → close(`finally`)の順序、`NJS-040` / 外側タイマー(`break()` 呼出)/ `callTimeout` の `504` 写像、`limit + 1` 行で `RowLimitExceededError`、`poolMax` 飽和時に上限時間内で `504`、`close()` が `pool.close(DB_SHUTDOWN_DRAIN_S)` を呼ぶことを確認 |
 | ルート(`app.test.ts` 拡張) | seed 済み一時 SQLite で `200`(行あり/0件)、`400`、`500`(行スキーマ違反・行数上限超過)、`503`(未設定)、OpenAPI にパスが出る |
 | 結合(`api.integration.test.ts`) | サーバ起動 → seed → `POST /queries/products` の end-to-end |
 | E2E(`playwright test`) | 変更なし(既存 2 件が green のまま) |
