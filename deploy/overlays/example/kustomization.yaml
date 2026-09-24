@@ -11,6 +11,7 @@ resources:
   - ../../base
   # 外部公開する場合のみ、TLS + 認証プロキシ/到達元制限を構成した上で route.yaml を resources に追加して有効化する（既定では公開しない）
   - configmap.yaml
+  # secret.yaml は見本(値は placeholder)。実値の Secret はクラスタ側で作成し、ここには追加しない
 
 images:
   - name: playwright-api
@@ -30,3 +31,13 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
+  # DB_QUERY_TIMEOUT_MS / DB_SHUTDOWN_DRAIN_S を既定より増やした場合は、shutdown の猶予も
+  # ceil(max(30, DB_QUERY_TIMEOUT_MS/1000 + 5)) + DB_SHUTDOWN_DRAIN_S + 20 秒以上に上書きする。
+  # 例(DB_QUERY_TIMEOUT_MS=60000 の場合は 65 + 10 + 20 = 95):
+  # - target:
+  #     kind: Deployment
+  #     name: playwright-api
+  #   patch: |-
+  #     - op: replace
+  #       path: /spec/template/spec/terminationGracePeriodSeconds
+  #       value: 95

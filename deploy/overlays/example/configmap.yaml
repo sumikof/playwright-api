@@ -12,3 +12,14 @@ metadata:
 data:
   BASE_URL: "https://target.example.internal"
   MAX_CONCURRENCY: "1"
+  # --- DB データ取得 API(任意。使う場合だけコメントを外す) ---
+  # パスワード(DB_ORACLE_PASSWORD)は ConfigMap に書かず Secret(secret.yaml 参照)で渡す。
+  # 接続ユーザーは SELECT 権限のみのアカウントにすること。
+  # DB_DIALECT: "oracle"
+  # DB_ORACLE_CONNECT_STRING: "db.example.internal:1521/ORCLPDB1"
+  # DB_ORACLE_USER: "e2e_readonly"
+  # DB_POOL_MAX: "2"
+  # DB_MAX_ROWS: "1000"
+  # 以下を増やす場合は kustomization.yaml の terminationGracePeriodSeconds も上書きする
+  # DB_QUERY_TIMEOUT_MS: "30000"
+  # DB_SHUTDOWN_DRAIN_S: "10"
