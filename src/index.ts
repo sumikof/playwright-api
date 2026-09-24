@@ -10,6 +10,8 @@ import { createApp } from './core/http/app.js'
 import { scenarios } from './scenarios/index.js'
 import { buildRegistry } from './core/registry.js'
 import { createDbProvider } from './core/db/provider.js'
+import { buildQueryRegistry } from './core/db/query.js'
+import { queries } from './queries/index.js'
 import { gracefulShutdown, shutdownBudget } from './core/lifecycle.js'
 import type { RunJob } from './core/run/types.js'
 
@@ -21,6 +23,8 @@ async function main(): Promise<void> {
 
   // ID重複を起動時に検出（例外で落とす）
   buildRegistry(scenarios)
+  // クエリ定義の不備(id 重複・非 SELECT・バインド不整合・maxRows)も起動時に検出する
+  buildQueryRegistry(queries, { maxRows: config.db.maxRows })
 
   const provider = createBrowserProvider(config)
   const store = new FileRunStore(config.runsDir)
@@ -41,7 +45,12 @@ async function main(): Promise<void> {
     dbQueryTimeoutMs: config.db.queryTimeoutMs,
     dbShutdownDrainS: config.db.shutdownDrainS,
   })
-  const app = createApp({ scenarios, service, runsDir: config.runsDir })
+  const app = createApp({
+    scenarios,
+    service,
+    runsDir: config.runsDir,
+    queries: { queries, db, maxRows: config.db.maxRows, timeoutMs: config.db.queryTimeoutMs },
+  })
 
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     console.log(`Playwright E2E API listening on http://localhost:${info.port}`)
