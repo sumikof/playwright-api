@@ -197,23 +197,33 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 - shutdown の手順を `src/core/lifecycle.ts` の `gracefulShutdown({ server, queue, provider, db,
   drainTimeoutMs })` に切り出し(`src/index.ts` はこれを呼ぶだけにする)、順序を次のとおりにする:
   1. `server.close(cb)` を開始し、その完了 Promise を `serverClosed` とする
-  2. `Promise.race([Promise.all([queue.drain(), serverClosed]), timeout(drainTimeoutMs = 30000)])`
-     を待つ(ブラウザジョブと処理中 HTTP 応答の両方を、既存と同じ 30 秒上限で待つ)
+  2. `Promise.race([Promise.all([queue.drain(), serverClosed]), timeout(drainTimeoutMs)])` を待つ
+     (ブラウザジョブと処理中 HTTP 応答の両方を待つ)。**`drainTimeoutMs` は固定値にせず、
+     `max(30000, DB_QUERY_TIMEOUT_MS + 5000)` とする**。DB クエリは期限到来後に `break()` →
+     エラー変換 → `504` 送信という後処理を伴うため、`DB_QUERY_TIMEOUT_MS` ちょうどでは応答を
+     書き終えられない。5 秒はその後処理の余裕。30 秒は既存のブラウザ drain 上限の据え置き。
+     既定値(`DB_QUERY_TIMEOUT_MS=30000`)では 35 秒になる。この算出は `lifecycle.ts` の純粋関数
+     `shutdownBudget({ dbQueryTimeoutMs, dbShutdownDrainS })` に置き、`drainTimeoutMs` と
+     推奨 `terminationGracePeriodSeconds`(`ceil(drainTimeoutMs / 1000) + dbShutdownDrainS + 20`)
+     を返す。起動ログに推奨猶予秒数を出力し、manifest との乖離に気づけるようにする。
   3. `provider.close()`
   4. `db?.close()`(Oracle は `pool.close(DB_SHUTDOWN_DRAIN_S)`。手順 2 で応答完了まで待って
      いるため通常は使用中接続が無く即時完了する。上限超過で残った接続だけが drain の対象)
   5. `process.exit(0)`
 
-  合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒で変わらない。**`deploy/base/deployment.yaml` に
-  `terminationGracePeriodSeconds: 60` を設定する**(「デプロイ(OpenShift)」参照)。現状の
-  manifest は未設定で Kubernetes 既定の 30 秒のため、ブラウザの drain だけで猶予を使い切ると
-  `db.close()` に到達する前に Pod が強制終了される。
+  合計上限は `ceil(drainTimeoutMs / 1000) + DB_SHUTDOWN_DRAIN_S` 秒(既定値で 45 秒)。
+  **`deploy/base/deployment.yaml` に `terminationGracePeriodSeconds: 70` を設定する**
+  (「デプロイ(OpenShift)」参照)。現状の manifest は未設定で Kubernetes 既定の 30 秒のため、
+  ブラウザの drain だけで猶予を使い切ると `db.close()` に到達する前に Pod が強制終了される。
 - テスト(`oracledb` モック): `close()` が `pool.close(drainTime)` を `DB_SHUTDOWN_DRAIN_S` で
   呼ぶこと、`close()` 後の `query()` が `503` 相当のエラーになること。
 - テスト(`lifecycle.test.ts`): `serve()` をポート 0 で起動し、応答を数百 ms 遅延させるハンドラへ
   リクエストを送った直後に `gracefulShutdown` を呼ぶ(`process.exit` はモック)。リクエストが
   `200` で完了すること、`db.close` がその応答完了より後に呼ばれること、`drainTimeoutMs` 超過時は
-  待ちを打ち切って先へ進むことを確認する。
+  待ちを打ち切って先へ進むことを確認する。加えて `shutdownBudget()` の単体テスト:
+  `dbQueryTimeoutMs=30000` → `drainTimeoutMs=35000` / 推奨猶予 65 秒、`dbQueryTimeoutMs=60000` →
+  `drainTimeoutMs=65000` / 推奨猶予 95 秒、`dbQueryTimeoutMs=1000` → `drainTimeoutMs=30000`
+  (下限 30 秒が効く)。
 
 ### SqliteProvider(開発用)
 
@@ -363,12 +373,14 @@ fixtures/demo-db/    ← 共有(削除しない)
 - パスワードは `Secret` から `DB_ORACLE_PASSWORD` として注入する。`deploy/base/deployment.yaml` に
   `envFrom.secretRef`(`optional: true`)を追加し、overlay 側に `secret.yaml` の**見本**
   (値は placeholder)を置く。実値はクラスタ側で作成する旨を `docs/deploy-openshift.md` に書く。
-- **`deploy/base/deployment.yaml` の `spec.template.spec` に `terminationGracePeriodSeconds: 60`
-  を追加する**。内訳: `queue.drain()` 上限 30 秒 + `DB_SHUTDOWN_DRAIN_S` 既定 10 秒 +
-  `provider.close()` / プロセス終了の余裕 20 秒。overlay 側で `DB_SHUTDOWN_DRAIN_S` を増やす場合は
-  `terminationGracePeriodSeconds` も `30 + DB_SHUTDOWN_DRAIN_S + 20` 以上に上書きする旨を
-  `docs/deploy-openshift.md` に書き、example overlay にコメントで併記する。
-  検証: `kubectl kustomize deploy/overlays/example` の出力に `terminationGracePeriodSeconds: 60`
+- **`deploy/base/deployment.yaml` の `spec.template.spec` に `terminationGracePeriodSeconds: 70`
+  を追加する**。内訳: drain 上限 `max(30, DB_QUERY_TIMEOUT_MS/1000 + 5)` = 既定 35 秒 +
+  `DB_SHUTDOWN_DRAIN_S` 既定 10 秒 + `provider.close()` / プロセス終了の余裕 20 秒 = 65 秒を
+  切り上げて 70 秒。overlay 側で `DB_QUERY_TIMEOUT_MS` または `DB_SHUTDOWN_DRAIN_S` を増やす場合は
+  `terminationGracePeriodSeconds` も **`ceil(max(30, DB_QUERY_TIMEOUT_MS/1000 + 5)) +
+  DB_SHUTDOWN_DRAIN_S + 20` 以上**に上書きする旨を `docs/deploy-openshift.md` に書き、example
+  overlay にコメントで併記する(起動ログにも同じ推奨値を出す)。
+  検証: `kubectl kustomize deploy/overlays/example` の出力に `terminationGracePeriodSeconds: 70`
   が含まれること(既存の Phase 3 検証コマンドに追加)。
 - Docker イメージへの追加は不要(`oracledb` Thin は pure JS、`node:sqlite` は Node 組み込み)。
   ただし **ベースイメージ同梱の Node が 22.13 以上であること**を実装時に確認する(Playwright
@@ -394,7 +406,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 | 1 | DB 抽象 + SQLite + 設定(`src/core/db/`, `config.ts`, `@types/node` 更新)+ `src/core/lifecycle.ts` への shutdown 切り出し | `npm test` green、新規ユニット追加(`lifecycle.test.ts` 含む) |
 | 2 | クエリ定義・レジストリ・HTTP ルート・サンプル・seed | Swagger UI から `products` を実行できる。ルート/結合テスト green |
 | 3 | Oracle Provider | モックテスト green。ユーザー環境の Oracle で `products` 相当が `200` |
-| 4 | ドキュメント・デプロイ(README、offline-build、deploy-openshift、`deployment.yaml` の `terminationGracePeriodSeconds` / `secretRef`、overlay、engineering-standards) | レビュー。`kubectl kustomize deploy/overlays/example` に `terminationGracePeriodSeconds: 60` が含まれる |
+| 4 | ドキュメント・デプロイ(README、offline-build、deploy-openshift、`deployment.yaml` の `terminationGracePeriodSeconds` / `secretRef`、overlay、engineering-standards) | レビュー。`kubectl kustomize deploy/overlays/example` に `terminationGracePeriodSeconds: 70` が含まれる |
 
 ## 意図的に含めないもの(YAGNI)
 
