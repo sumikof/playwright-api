@@ -1,7 +1,7 @@
 # DB データ取得 API(名前付きクエリ)設計
 
 日付: 2026-09-18
-状態: **ドラフト(ユーザー設計承認待ち)**
+状態: **ドラフト(主要判断はユーザー確認済み 2026-09-24。Codex 設計レビュー → ユーザー設計承認待ち)**
 
 ## 背景と目的
 
@@ -174,9 +174,8 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 - **バージョンと対応 DB**(2026-09-18 時点の npm 最新は `oracledb@7.0.1`、6 系最新は `6.10.0`):
   - `^7` — Oracle Database **19c 以降**のみ(19 未満との接続は 6.10 で非推奨、7.0 で削除)。
   - `^6.10` — Oracle Database 12.1 以降(19 未満は非推奨扱いだが接続可)。
-  - 本 spec は **`^7` を採用し、対象 DB は 19c 以降を前提**とする。対象システムの Oracle が
-    19c 未満の場合は `^6.10` に固定して採用する(未決事項 1)。いずれも Thin モードが既定で、
-    Thick モードへの切替は「意図的に含めないもの」参照。
+  - 本 spec は **`^7` を採用し、対象 DB は 19c 以降を前提**とする(ユーザー確認済み:対象システムの
+    Oracle は 19c 以降)。いずれも Thin モードが既定で、Thick モードへの切替は「意図的に含めないもの」参照。
 - 本テンプレートの CI・devcontainer には Oracle が無いため、`OracleProvider` の自動テストは
   `oracledb` モジュールをモックした単体テスト(バインドの受け渡し・`callTimeout` の設定・
   `close()` の保証)に留め、実 DB での動作確認はユーザー環境で行う(受け入れ条件参照)。
@@ -274,9 +273,9 @@ fixtures/demo-db/    ← 共有(削除しない)
 - **任意 SQL の実行 API**(前述)。必要なら fork 側で自己責任で追加する。
 - **書き込み(INSERT/UPDATE/DELETE/DDL)**。テストデータの投入は別の仕組み(既存のバッチ・
   マイグレーション)で行う。将来必要になれば `defineCommand` として別 API で設計する。
-- **シナリオからの DB アクセス(`ctx.db`)**。「画面操作後に DB を検証する」ユースケースは魅力的
-  だが、本 spec では API を確立するに留め、`ScenarioContext` への露出は別 spec で扱う
-  (`DbProvider` は再利用できる形にしておく)。
+- **シナリオからの DB アクセス(`ctx.db`)**。ユーザー確認済み:シナリオから DB クエリは実行しない。
+  本 spec は HTTP API のみを確立する。将来必要になれば別 spec で扱う(`DbProvider` は
+  再利用できる形にしておく)。
 - **複数 DB / 複数方言の同時接続**。
 - **Oracle Thick モード**(Instant Client 同梱)。Thin モードの対応範囲外の DB や Thick 限定機能が
   必要になったときに個別対応する。
@@ -289,17 +288,22 @@ fixtures/demo-db/    ← 共有(削除しない)
 
 | パッケージ | 種別 | 理由 |
 |---|---|---|
-| `oracledb` `^7` (7.0.1) | dependencies | Oracle 接続(Thin モード、pure JS)。対象 DB が 19c 未満なら `^6.10` |
+| `oracledb` `^7` (7.0.1) | dependencies | Oracle 接続(Thin モード、pure JS)。対象 DB は 19c 以降 |
 | `@types/node` `^22` (22.20.3) | devDependencies(更新) | `node:sqlite` の型定義。ランタイム基準(Node 24)に合わせ `^24` (24.13.5) でも可 |
 
 `node:sqlite` は Node 組み込みのため依存追加なし。固定バージョン方針(`docs/engineering-standards.md`)は
 Playwright にのみ適用されており、`oracledb` はキャレット付きで良い(Docker イメージタグとの整合
 要件が無い)。
 
+## 確定済みの設計判断(ユーザー確認 2026-09-24)
+
+1. 任意 SQL の実行 API は作らない。SQL はコードに置く名前付きクエリ方式
+2. 同期応答(run/queue モデルは採らない)
+3. SQLite ドライバは `node:sqlite`(Node 組み込み)
+4. 対象システムの Oracle Database は 19c 以降 → `oracledb ^7`
+5. シナリオからの DB 参照(`ctx.db`)は行わない。本 spec は HTTP API のみ
+
 ## 未決事項
 
-1. 対象システムの Oracle Database のバージョン。**19c 以降なら `oracledb ^7`**、12.1〜18c なら
-   `^6.10` を採用する(Thin モードの対応範囲)
-2. Playwright `v1.61.1-noble` イメージ同梱の Node バージョン(22.13 以上か)。実装時に確認し、
+1. Playwright `v1.61.1-noble` イメージ同梱の Node バージョン(22.13 以上か)。実装時に確認し、
    満たさなければ設計レビューへ戻す
-3. `ctx.db` としてシナリオへ露出するかは別 spec(本 spec では対象外と明記)
