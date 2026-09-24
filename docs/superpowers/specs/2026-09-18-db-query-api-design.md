@@ -186,14 +186,34 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
   残クエリ時間)`。active-query カウンタは持たない(プールの drain で足りる)。
 - `SqliteProvider.close()` は `db.close()` のみ。実行が同期のため、`await` をまたぐ処理中クエリは
   存在しない。
-- `src/index.ts` の shutdown 順序は `server.close()` → `queue.drain()` → `provider.close()` →
-  **`db?.close()`** → `process.exit(0)`。DB の drain はブラウザの drain と並行させず直列にする
-  (合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒)。**`deploy/base/deployment.yaml` に
+- **HTTP 応答の完了を待ってから DB を閉じる**。Oracle 接続は Provider の `finally` で行検証や
+  レスポンス送信より前に返却されるため、プールの drain だけでは「処理中の HTTP 応答を失わない」
+  ことにならない(`db.close()` が即座に完了し、`200` を書き終える前に `process.exit(0)` に進み得る)。
+  既存の `src/index.ts` は `server.close()` の完了(callback)を待っていないので、これを待つ形に
+  改める。Node の `http.Server#close(cb)` は新規接続の受付を止め、アイドルな keep-alive 接続を
+  閉じ(Node 19 以降)、**処理中のリクエストがすべて応答を書き終えてから** callback を呼ぶ。
+  DB ルートの処理中リクエストは `DB_QUERY_TIMEOUT_MS` で必ず終わるため、待ち時間は有界。
+  active-request カウンタは持たない(`server.close(cb)` で足りる)。
+- shutdown の手順を `src/core/lifecycle.ts` の `gracefulShutdown({ server, queue, provider, db,
+  drainTimeoutMs })` に切り出し(`src/index.ts` はこれを呼ぶだけにする)、順序を次のとおりにする:
+  1. `server.close(cb)` を開始し、その完了 Promise を `serverClosed` とする
+  2. `Promise.race([Promise.all([queue.drain(), serverClosed]), timeout(drainTimeoutMs = 30000)])`
+     を待つ(ブラウザジョブと処理中 HTTP 応答の両方を、既存と同じ 30 秒上限で待つ)
+  3. `provider.close()`
+  4. `db?.close()`(Oracle は `pool.close(DB_SHUTDOWN_DRAIN_S)`。手順 2 で応答完了まで待って
+     いるため通常は使用中接続が無く即時完了する。上限超過で残った接続だけが drain の対象)
+  5. `process.exit(0)`
+
+  合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒で変わらない。**`deploy/base/deployment.yaml` に
   `terminationGracePeriodSeconds: 60` を設定する**(「デプロイ(OpenShift)」参照)。現状の
   manifest は未設定で Kubernetes 既定の 30 秒のため、ブラウザの drain だけで猶予を使い切ると
   `db.close()` に到達する前に Pod が強制終了される。
 - テスト(`oracledb` モック): `close()` が `pool.close(drainTime)` を `DB_SHUTDOWN_DRAIN_S` で
   呼ぶこと、`close()` 後の `query()` が `503` 相当のエラーになること。
+- テスト(`lifecycle.test.ts`): `serve()` をポート 0 で起動し、応答を数百 ms 遅延させるハンドラへ
+  リクエストを送った直後に `gracefulShutdown` を呼ぶ(`process.exit` はモック)。リクエストが
+  `200` で完了すること、`db.close` がその応答完了より後に呼ばれること、`drainTimeoutMs` 超過時は
+  待ちを打ち切って先へ進むことを確認する。
 
 ### SqliteProvider(開発用)
 
@@ -325,6 +345,7 @@ src/core/db/
   oracle.ts          OracleProvider (oracledb thin)
   query.ts           QueryDefinition / defineQuery / buildQueryRegistry / SQL 検査
 src/core/http/routes/queries.ts   GET /queries, POST /queries/{id}
+src/core/lifecycle.ts             gracefulShutdown(既存 index.ts の shutdown を切り出し、DB close と応答完了待ちを追加)
 src/queries/         ← fork 所有
   index.ts
   products.ts        サンプル
@@ -370,7 +391,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 
 | # | フェーズ | 完了条件 |
 |---|---|---|
-| 1 | DB 抽象 + SQLite + 設定(`src/core/db/`, `config.ts`, `@types/node` 更新) | `npm test` green、新規ユニット追加 |
+| 1 | DB 抽象 + SQLite + 設定(`src/core/db/`, `config.ts`, `@types/node` 更新)+ `src/core/lifecycle.ts` への shutdown 切り出し | `npm test` green、新規ユニット追加(`lifecycle.test.ts` 含む) |
 | 2 | クエリ定義・レジストリ・HTTP ルート・サンプル・seed | Swagger UI から `products` を実行できる。ルート/結合テスト green |
 | 3 | Oracle Provider | モックテスト green。ユーザー環境の Oracle で `products` 相当が `200` |
 | 4 | ドキュメント・デプロイ(README、offline-build、deploy-openshift、`deployment.yaml` の `terminationGracePeriodSeconds` / `secretRef`、overlay、engineering-standards) | レビュー。`kubectl kustomize deploy/overlays/example` に `terminationGracePeriodSeconds: 60` が含まれる |
