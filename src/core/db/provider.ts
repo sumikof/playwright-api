@@ -1,6 +1,7 @@
 import type { Config } from '../config.js'
 import type { Dialect } from './query.js'
 import { SqliteProvider } from './sqlite.js'
+import { OracleProvider } from './oracle.js'
 
 export interface QueryOptions {
   /** 接続取得〜実行完了までの期限(Oracle のみ適用) */
@@ -48,6 +49,11 @@ export function createDbProvider(config: Config): DbProvider | null {
     case 'sqlite':
       return new SqliteProvider(db.sqliteFile!)
     case 'oracle':
-      throw new Error('oracle provider is not implemented yet')
+      return new OracleProvider({
+        ...db.oracle!,
+        poolMax: db.poolMax,
+        queryTimeoutMs: db.queryTimeoutMs,
+        shutdownDrainS: db.shutdownDrainS,
+      })
   }
 }
