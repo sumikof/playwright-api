@@ -33,13 +33,41 @@ function sqlVariants(sql: QuerySql): string[] {
   return typeof sql === 'string' ? [sql] : Object.values(sql).filter((v): v is string => typeof v === 'string')
 }
 
-/** コメント・文字列リテラル・引用識別子を取り除く(中の :name や SELECT を誤検出しないため) */
+/**
+ * コメント・文字列リテラル・引用識別子を空白に置き換える(中の :name や SELECT を誤検出しないため)。
+ * 置換を順に重ねると「リテラル内の --」「コメント内の '」で誤認するため、状態を持って 1 回で走査する。
+ */
 function stripNonCode(sql: string): string {
-  return sql
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/'(?:[^']|'')*'/g, "''")
-    .replace(/"(?:[^"]|"")*"/g, '""')
+  let out = ''
+  let i = 0
+  while (i < sql.length) {
+    const ch = sql[i]!
+    const next = sql[i + 1]
+    if (ch === '-' && next === '-') {
+      const end = sql.indexOf('\n', i)
+      i = end === -1 ? sql.length : end
+      out += ' '
+    } else if (ch === '/' && next === '*') {
+      const end = sql.indexOf('*/', i + 2)
+      i = end === -1 ? sql.length : end + 2
+      out += ' '
+    } else if (ch === "'" || ch === '"') {
+      // '' / "" は閉じ引用符ではなくエスケープ
+      let j = i + 1
+      while (j < sql.length) {
+        if (sql[j] === ch) {
+          if (sql[j + 1] === ch) j += 2
+          else break
+        } else j++
+      }
+      i = j + 1
+      out += ' '
+    } else {
+      out += ch
+      i++
+    }
+  }
+  return out
 }
 
 export function extractBindNames(sql: string): Set<string> {

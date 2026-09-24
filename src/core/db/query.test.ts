@@ -32,14 +32,24 @@ describe('extractBindNames', () => {
       FROM t /* :d */ WHERE a = :x AND b = 'it''s :h'`
     expect(extractBindNames(sql)).toEqual(new Set(['x']))
   })
+
+  it('does not treat comment markers inside literals as comments', () => {
+    expect(extractBindNames(`SELECT 'a--b' AS "x", :actual FROM dual`)).toEqual(new Set(['actual']))
+    expect(extractBindNames(`SELECT '/*' AS "x", :a, '*/' AS "y" FROM dual`)).toEqual(new Set(['a']))
+    expect(extractBindNames(`SELECT "a--b", :c FROM t`)).toEqual(new Set(['c']))
+  })
+
+  it('does not treat quotes inside comments as literals', () => {
+    expect(extractBindNames(`SELECT 1 -- it's a comment\n FROM t WHERE a = :a /* don't */ AND b = :b`)).toEqual(new Set(['a', 'b']))
+  })
 })
 
 describe('isReadOnlyStatement', () => {
-  it.each(['SELECT 1', 'select 1', '  \n SELECT 1', '-- c\nSELECT 1', '/* c */ WITH x AS (SELECT 1) SELECT * FROM x'])(
+  it.each(["-- don't\nSELECT 1", "/* it's */ SELECT 1", 'SELECT 1', 'select 1', '  \n SELECT 1', '-- c\nSELECT 1', '/* c */ WITH x AS (SELECT 1) SELECT * FROM x'])(
     'accepts %j',
     (sql) => expect(isReadOnlyStatement(sql)).toBe(true),
   )
-  it.each(['UPDATE t SET a = 1', 'DELETE FROM t', 'INSERT INTO t VALUES (1)', 'CREATE TABLE t (a INT)', '  -- c\n DROP TABLE t', 'SELECTX'])(
+  it.each(['UPDATE t SET a = 1', 'DELETE FROM t', 'INSERT INTO t VALUES (1)', 'CREATE TABLE t (a INT)', '  -- c\n DROP TABLE t', 'SELECTX', "/* 'x */ DELETE FROM t", "-- SELECT\nDELETE FROM t"])(
     'rejects %j',
     (sql) => expect(isReadOnlyStatement(sql)).toBe(false),
   )
