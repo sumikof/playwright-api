@@ -63,9 +63,9 @@ POST /queries/{id}  ─→  QueryDefinition (params zod → SQL + binds) ─→ 
 |---|---|
 | `200` | 実行成功。行が0件でも `200`(`rows: []`) |
 | `400` | `params` スキーマ違反(既存の `defaultHook` と同じ形 `{ error: { message } }`) |
-| `500` | DB エラー(接続失敗・SQL エラー)、または返却行が `row` スキーマに違反 |
+| `500` | DB エラー(接続失敗・SQL エラー)、返却行が `row` スキーマに違反、または行数が上限超過(「結果行数の上限」参照) |
 | `503` | DB が未設定(`DB_DIALECT` 未指定)のとき |
-| `504` | `DB_QUERY_TIMEOUT_MS` 超過 |
+| `504` | `DB_QUERY_TIMEOUT_MS` 超過(接続プール待ちを含む。Oracle のみ) |
 
 シナリオ API と同じく、クエリごとに個別のパスを生成する。OpenAPI 上でリクエストボディが
 そのクエリの `params` スキーマ、レスポンスの `rows` が `z.array(row)` になり、Swagger UI から
@@ -107,6 +107,7 @@ export interface QueryDefinition<P extends z.ZodType, R extends z.ZodType> {
   params: P                                   // バインド変数(リクエストボディ)
   row: R                                      // 1行の型(レスポンス rows[] の要素)
   sql: string | ({ default: string } & Partial<Record<Dialect, string>>)
+  maxRows?: number                            // 省略時は DB_MAX_ROWS。それを超える値は起動時エラー
 }
 ```
 
@@ -122,6 +123,25 @@ export interface QueryDefinition<P extends z.ZodType, R extends z.ZodType> {
   キーの大文字小文字を変換する魔法は入れない(変換規則自体が方言差の温床になる)。
 - 行は `z.array(row)` で検証してから返す。違反は `500`(シナリオが `result` を検証するのと同じ
   姿勢。列名の書き間違いを Swagger の型不一致ではなくエラーとして早期に気づかせる)。
+- 定義に任意の `maxRows?: number` を持てる。省略時は `DB_MAX_ROWS`。`DB_MAX_ROWS` を超える値は
+  起動時エラー(「結果行数の上限」参照)。
+
+### 結果行数の上限(強制)
+
+fork 側のクエリが絞り込みを忘れた場合に、全行をドライバで配列化 → Zod 検証 → JSON 化して
+Pod のメモリ上限を超えるのを防ぐため、**行数上限をテンプレート側で必ず強制する**。
+
+- 上限は `min(定義の maxRows, DB_MAX_ROWS)`。既定 `DB_MAX_ROWS=1000`。定義で `DB_MAX_ROWS` より
+  大きい値を指定した場合は `buildQueryRegistry` が起動時に落とす(設定側の上限を定義で
+  迂回できない)。
+- Provider は **`maxRows + 1` 件まで**しか取得しない(Oracle は `execute` の `maxRows` オプション、
+  SQLite は `iterate()` を `maxRows + 1` 件で打ち切る)。`maxRows + 1` 件目が存在したら
+  **`500` `{ error: { message: "row limit exceeded (maxRows=N)" } }`** を返し、行は返さない
+  (黙って切り詰めると呼び出し側が全件と誤認するため)。
+- 上限に収めるのはクエリ側の責務(`WHERE` で絞る、`FETCH FIRST n ROWS ONLY` を書く)。
+  ページングは引き続き対象外。
+- テスト: SQLite で `maxRows` ちょうどは `200`、`maxRows + 1` 行あると `500`、定義の `maxRows` が
+  `DB_MAX_ROWS` を超えると起動時エラー。
 
 ### レジストリ
 
@@ -130,6 +150,7 @@ export interface QueryDefinition<P extends z.ZodType, R extends z.ZodType> {
 - SQL がコメント・空白を除いて `SELECT` または `WITH` で始まること(読み取り専用の意思表示。
   Oracle 側の権限で本来担保するが、定義ミスを起動時に検出する)
 - 前述のバインド名と `params` キーの整合
+- 定義の `maxRows` が `DB_MAX_ROWS` 以下であること
 
 ## DbProvider 抽象
 
@@ -137,7 +158,8 @@ export interface QueryDefinition<P extends z.ZodType, R extends z.ZodType> {
 // src/core/db/provider.ts
 export interface DbProvider {
   readonly dialect: Dialect
-  query(sql: string, binds: Record<string, unknown>, opts: { timeoutMs: number }): Promise<Record<string, unknown>[]>
+  query(sql: string, binds: Record<string, unknown>, opts: { timeoutMs: number; maxRows: number }): Promise<Record<string, unknown>[]>
+  // maxRows + 1 件目が存在すれば RowLimitExceededError を投げる(呼び出し側で 500 に写像)
   close(): Promise<void>
 }
 export function createDbProvider(config: Config): DbProvider | null   // DB_DIALECT 未設定なら null
@@ -150,9 +172,16 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 - **`node:sqlite`(Node 組み込み)** を使う。追加依存ゼロで、ネイティブモジュールのビルドも
   プリビルドバイナリの取得も不要。オフライン成果物パイプライン(`vendor/node_modules.tar.gz`)に
   プラットフォーム依存物を持ち込まない。
-- `new DatabaseSync(file, { readOnly: true })` で開く。`:memory:` も許す(テスト用)。
+- `new DatabaseSync(file, { readOnly: true })` で開く。**`:memory:` は許可しない**。読み取り専用の
+  `:memory:` には seed を書けず、別接続で開いた `:memory:` は内容を共有しない(検証済み:
+  `attempt to write a readonly database` / `no such table`)ため、常に空の DB になる。
+- **テストは「seed 済み一時ファイルを readOnly で開き直す」方式**で行う。`fixtures/demo-db/seed.ts`
+  は `seedSqlite(file)` 関数をエクスポートし、テストはこれで一時ディレクトリにファイルを作ってから
+  `SqliteProvider` に渡す(`DatabaseSync` インスタンスの注入は行わず、Provider は常に readOnly で
+  自分で開く。書き込み可能な接続が製品コードの経路に入らないようにする)。
 - 実行は同期(イベントループをブロックする)。開発用途で行数も小さい前提なので許容する。
-  `timeoutMs` は SQLite では適用しない(実装上 `db.prepare(sql).all(binds)` を呼ぶだけ)。
+  `timeoutMs` は SQLite では適用しない。行の取得は `db.prepare(sql).iterate(binds)` で
+  `maxRows + 1` 件まで読んで打ち切る(「結果行数の上限」参照)。
 - `node:sqlite` は Node 22.13+ で無フラグ利用可だが実行時に `ExperimentalWarning` が出る。
   `dev` スクリプトに `--no-warnings=ExperimentalWarning` を付けるかは実装時に判断(本番は Oracle
   想定のため警告は出ない)。
@@ -167,8 +196,16 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 - 接続プール(`oracledb.createPool`)を起動時に作る。`poolMin=0`, `poolMax=DB_POOL_MAX`(既定 `2`)。
   起動時には **接続を試みない**(DB 停止中でも API サーバは起動し、クエリ時に `500` を返す)。
   ヘルスチェック `/health` も DB を見ない(Pod の生死と DB の生死を分ける)。
-- クエリごとに `pool.getConnection()` → `connection.callTimeout = timeoutMs` →
-  `execute(sql, binds, { outFormat: OBJECT })` → `close()`。`callTimeout` 超過は `504` に写像する。
+- **接続取得から実行完了までを単一の期限(deadline = 開始時刻 + `DB_QUERY_TIMEOUT_MS`)で管理**する。
+  - プール作成時に `queueTimeout = DB_QUERY_TIMEOUT_MS` を設定する(`poolMax` を使い切った状態での
+    `pool.getConnection()` 待ちがこの時間で `NJS-040` として失敗する。既定の 60 秒のままにしない)。
+  - クエリごとに `pool.getConnection()` → `connection.callTimeout = deadline - now`(残り時間。
+    0 以下なら実行せずタイムアウト扱い)→ `execute(sql, binds, { outFormat: OBJECT, maxRows })`
+    → `close()`(`finally` で必ず返却)。
+  - プール待ちのタイムアウト(`NJS-040`)と `callTimeout` 超過(`NJS-123` / `DPI-1067` 相当)は
+    どちらも `504` に写像する。それ以外の DB エラーは `500`。
+  - テスト(`oracledb` モック): `poolMax` 飽和時に後続リクエストが `DB_QUERY_TIMEOUT_MS` 以内に
+    `504` で返ること、および `callTimeout` が残り時間で設定されることを確認する。
 - 読み取り専用は **DB ユーザーの権限で担保**する(SELECT 権限のみのアカウントを用意する旨を
   ドキュメントに書く)。`autoCommit` は既定の `false` のまま、コミットは呼ばない。
 - **バージョンと対応 DB**(2026-09-18 時点の npm 最新は `oracledb@7.0.1`、6 系最新は `6.10.0`):
@@ -190,12 +227,13 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `DB_DIALECT` | (未設定) | `sqlite` \| `oracle`。未設定なら DB 機能は無効(`POST /queries/*` は `503`) |
-| `DB_SQLITE_FILE` | (sqlite 時必須) | SQLite ファイルパス。`:memory:` 可 |
+| `DB_SQLITE_FILE` | (sqlite 時必須) | SQLite ファイルパス(読み取り専用で開く。`:memory:` は不可) |
 | `DB_ORACLE_USER` | (oracle 時必須) | 接続ユーザー(SELECT 権限のみ推奨) |
 | `DB_ORACLE_PASSWORD` | (oracle 時必須) | パスワード(OpenShift では Secret から注入) |
 | `DB_ORACLE_CONNECT_STRING` | (oracle 時必須) | `host:port/service_name` 形式の Easy Connect 文字列 |
 | `DB_POOL_MAX` | `2` | Oracle 接続プール上限 |
-| `DB_QUERY_TIMEOUT_MS` | `30000` | 1クエリの実行時間上限(Oracle のみ有効) |
+| `DB_QUERY_TIMEOUT_MS` | `30000` | 1クエリの上限。接続プール待ち + 実行の合計(Oracle のみ有効) |
+| `DB_MAX_ROWS` | `1000` | 1クエリが返せる最大行数。超過は `500`。定義の `maxRows` はこれ以下に限る |
 
 `config.ts` の zod スキーマで **方言ごとの必須項目を条件付きで検証**する(`DB_DIALECT=oracle`
 なのに `DB_ORACLE_USER` が無い、は起動時に落とす)。`DB_DIALECT` 未設定は正常(DB を使わない
@@ -210,8 +248,9 @@ fork を許す)。
 
 - `fixtures/demo-db/seed.sql` — `products` テーブルの DDL と数行の INSERT(demo-app の商品一覧と
   対応させる)。SQLite / Oracle 双方で通る最小限の SQL に留める(型は `INTEGER` / `TEXT` 相当)。
-- `fixtures/demo-db/seed.ts` — `seed.sql` を SQLite ファイルへ流し込む小スクリプト。
-  `npx tsx fixtures/demo-db/seed.ts ./demo.sqlite` で開発用 DB を作る(生成物は gitignore)。
+- `fixtures/demo-db/seed.ts` — `seed.sql` を SQLite ファイルへ流し込む `seedSqlite(file)` を
+  エクスポートし、CLI としても使える小スクリプト。`npx tsx fixtures/demo-db/seed.ts ./demo.sqlite`
+  で開発用 DB を作る(生成物は gitignore)。テストも同じ関数で一時ファイルを作る。
 - `src/queries/products.ts` — 前掲のサンプルクエリ。`src/queries/index.ts` に登録。
 - README クイックスタートに `DB_DIALECT=sqlite DB_SQLITE_FILE=./demo.sqlite` を追記する。
 
@@ -252,10 +291,10 @@ fixtures/demo-db/    ← 共有(削除しない)
 
 | 対象 | 方法 |
 |---|---|
-| `SqliteProvider` | `:memory:` に seed.sql を流し、バインド・0件・SQL エラー・readOnly を確認 |
-| `buildQueryRegistry` | id 重複、非 SELECT 文、バインド名と `params` の不整合を起動時に落とす |
-| `OracleProvider` | `oracledb` をモックし、pool 取得 → `callTimeout` 設定 → execute → close の順序と `504` 写像を確認 |
-| ルート(`app.test.ts` 拡張) | `:memory:` SQLite で `200`(行あり/0件)、`400`、`500`(行スキーマ違反)、`503`(未設定)、OpenAPI にパスが出る |
+| `SqliteProvider` | `seedSqlite()` で一時ファイルを作り readOnly で開く。バインド・0件・SQL エラー・書き込み拒否・`maxRows + 1` 行で `RowLimitExceededError` を確認 |
+| `buildQueryRegistry` | id 重複、非 SELECT 文、バインド名と `params` の不整合、`maxRows > DB_MAX_ROWS` を起動時に落とす |
+| `OracleProvider` | `oracledb` をモックし、pool 取得 → 残り時間で `callTimeout` 設定 → `execute(maxRows)` → close(`finally`)の順序、`NJS-040` / `callTimeout` の `504` 写像、`poolMax` 飽和時に上限時間内で `504` になることを確認 |
+| ルート(`app.test.ts` 拡張) | seed 済み一時 SQLite で `200`(行あり/0件)、`400`、`500`(行スキーマ違反・行数上限超過)、`503`(未設定)、OpenAPI にパスが出る |
 | 結合(`api.integration.test.ts`) | サーバ起動 → seed → `POST /queries/products` の end-to-end |
 | E2E(`playwright test`) | 変更なし(既存 2 件が green のまま) |
 
@@ -280,6 +319,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 - **Oracle Thick モード**(Instant Client 同梱)。Thin モードの対応範囲外の DB や Thick 限定機能が
   必要になったときに個別対応する。
 - **ページング・ストリーミング**。大量行はクエリ側で絞る(`FETCH FIRST n ROWS ONLY` 等)。
+  上限超過は「結果行数の上限」のとおりエラーにする(黙って切り詰めない)。
 - **結果のキャッシュ・保存**。`runs/` には残さない(DB 内容の平文コピーを増やさない)。
 - **認証**。既存方針どおり(OpenShift では Route を opt-in にし、ネットワークで守る)。
   DB データはシナリオ結果より機微である可能性が高いため、README の注意書きにその旨を追記する。
