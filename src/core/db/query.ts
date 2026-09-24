@@ -36,6 +36,7 @@ function sqlVariants(sql: QuerySql): string[] {
 /**
  * コメント・文字列リテラル・引用識別子を空白に置き換える(中の :name や SELECT を誤検出しないため)。
  * 置換を順に重ねると「リテラル内の --」「コメント内の '」で誤認するため、状態を持って 1 回で走査する。
+ * Oracle の代替引用(q'[...]')もリテラルとして扱う。
  */
 function stripNonCode(sql: string): string {
   let out = ''
@@ -49,6 +50,13 @@ function stripNonCode(sql: string): string {
       out += ' '
     } else if (ch === '/' && next === '*') {
       const end = sql.indexOf('*/', i + 2)
+      i = end === -1 ? sql.length : end + 2
+      out += ' '
+    } else if ((ch === 'q' || ch === 'Q') && next === "'" && !/\w/.test(sql[i - 1] ?? '') && i + 2 < sql.length) {
+      // Oracle の代替引用 q'X...X'(括弧は対応する閉じ括弧で終わる)。中の ' は終端ではない
+      const open = sql[i + 2]!
+      const close = ({ '[': ']', '{': '}', '(': ')', '<': '>' } as Record<string, string>)[open] ?? open
+      const end = sql.indexOf(close + "'", i + 3)
       i = end === -1 ? sql.length : end + 2
       out += ' '
     } else if (ch === "'" || ch === '"') {

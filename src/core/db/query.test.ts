@@ -39,6 +39,13 @@ describe('extractBindNames', () => {
     expect(extractBindNames(`SELECT "a--b", :c FROM t`)).toEqual(new Set(['c']))
   })
 
+  it('treats Oracle alternative quoting q\'X...X\' as a literal', () => {
+    expect(extractBindNames(`SELECT q'[That's :fake]' AS "note", :actual FROM dual`)).toEqual(new Set(['actual']))
+    expect(extractBindNames(`SELECT Q'{it's :a}', q'(:b)', q'<:c>', q'!it's :d!', :e FROM dual`)).toEqual(new Set(['e']))
+    // q で終わる識別子の直後の引用は通常のリテラル
+    expect(extractBindNames(`SELECT seq'x', :f FROM t`)).toEqual(new Set(['f']))
+  })
+
   it('does not treat quotes inside comments as literals', () => {
     expect(extractBindNames(`SELECT 1 -- it's a comment\n FROM t WHERE a = :a /* don't */ AND b = :b`)).toEqual(new Set(['a', 'b']))
   })
