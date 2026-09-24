@@ -65,6 +65,7 @@ spec が実装に委ねている点、または spec の記述を満たすため
 | D8 | SQLite ファイルが無い場合 | `SqliteProvider` のコンストラクタで readOnly オープンに失敗したら起動時エラー | 開発用途。設定ミスを最初のリクエストまで持ち越さない |
 | D9 | `ExperimentalWarning` | `dev` スクリプトは変更せず、README に「`node:sqlite` の ExperimentalWarning が出るが動作に影響しない」と記載 | spec が実装判断に委ねた点。スクリプトのフラグ追加は tsx の引数受け渡しに依存し、得るものが小さい |
 | D10 | `@types/node` | `^22`(`npm install -D @types/node@^22`) | 型は最も古い実行ランタイム(開発コンテナ Node 22.22)以下に揃える。Playwright イメージは Node 24 だが、24 固有 API を誤って使わないようにする |
+| D12 | `node:sqlite` の読み込み | `SqliteProvider` のコンストラクタで `process.getBuiltinModule('node:sqlite')` により遅延読み込みする(型は `import type`) | 静的 import だと DB 無効時や Oracle 時にも `ExperimentalWarning` が出る(2026-09-24 実行確認)。spec「本番は Oracle 想定のため警告は出ない」を満たすため |
 | D11 | Swagger UI のタグ | クエリのパスは `tags: ['queries']` にまとめる | 同名のシナリオ id とタグが衝突して Swagger UI で混ざらないようにする |
 
 ## 未決事項の解消

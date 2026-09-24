@@ -1,4 +1,4 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import { DbClosedError, RowLimitExceededError, type DbProvider, type QueryOptions } from './provider.js'
 
 /**
@@ -13,7 +13,9 @@ export class SqliteProvider implements DbProvider {
     if (file === ':memory:') {
       throw new Error('DB_SQLITE_FILE must be a file path (:memory: is not allowed)')
     }
-    this.db = new DatabaseSync(file, { readOnly: true })
+    // node:sqlite は読み込むだけで ExperimentalWarning を出すため、SQLite を使うときだけ読み込む
+    const sqlite = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite')
+    this.db = new sqlite.DatabaseSync(file, { readOnly: true })
   }
 
   async query(sql: string, binds: Record<string, unknown>, opts: QueryOptions): Promise<Record<string, unknown>[]> {
