@@ -64,6 +64,47 @@ data:
 - `BASE_URL`: playwright-api が訪問するウェブサイトの基盤 URL（例: `https://example.com`）
 - `MAX_CONCURRENCY`: 同時に実行可能なスクレイピング数。Pod のリソース制限（CPU/メモリ）とクラスタの負荷に応じて調整してください
 
+### ステップ 4: DB 接続(任意)
+
+DB データ取得 API(`POST /queries/{id}`)を使う場合だけ設定します。`DB_DIALECT` を設定しなければ
+DB 機能は無効(`POST /queries/*` は `503`)で、Secret も不要です。
+
+1. `configmap.yaml` の DB 設定のコメントを外し、接続先を設定します:
+
+   ```yaml
+   DB_DIALECT: "oracle"
+   DB_ORACLE_CONNECT_STRING: "db.example.internal:1521/ORCLPDB1"   # host:port/service_name
+   DB_ORACLE_USER: "e2e_readonly"
+   ```
+
+2. パスワードは ConfigMap に書かず、クラスタ側で Secret を作成します(`deploy/base/deployment.yaml` が
+   `envFrom.secretRef`(`playwright-api-db`、`optional: true`)で読み込みます)。
+   `deploy/overlays/example/secret.yaml` は見本で、kustomization の resources には含めません。
+   Git に実値を置かないでください。
+
+   ```bash
+   oc create secret generic playwright-api-db \
+     --from-literal=DB_ORACLE_PASSWORD='<password>'
+   ```
+
+3. 接続ユーザーは **SELECT 権限のみ**のアカウントにしてください。読み取り専用は DB の権限で担保します。
+   API は無認証のため、Route を公開する場合は後述の保護が必須です。
+
+4. **終了時の猶予(`terminationGracePeriodSeconds`)**: base は `70` 秒です。終了時は処理中の
+   HTTP 応答とブラウザジョブを最大 `max(30, DB_QUERY_TIMEOUT_MS/1000 + 5)` 秒待ち、その後
+   Oracle 接続を最大 `DB_SHUTDOWN_DRAIN_S` 秒 drain します。`DB_QUERY_TIMEOUT_MS` または
+   `DB_SHUTDOWN_DRAIN_S` を既定値(`30000` / `10`)より増やす場合は、猶予を
+
+   ```
+   ceil(max(30, DB_QUERY_TIMEOUT_MS / 1000 + 5)) + DB_SHUTDOWN_DRAIN_S + 20
+   ```
+
+   秒以上に overlay で上書きしてください(例: `DB_QUERY_TIMEOUT_MS=60000` なら `95`)。
+   patch の見本は `deploy/overlays/example/kustomization.yaml` にあります。同じ値が起動ログに
+   `Recommended terminationGracePeriodSeconds: >= N` として出力されます。
+
+イメージへの追加は不要です(`oracledb` は Thin モードの pure JS、SQLite は Node 組み込み)。
+
 ## マニフェストの適用
 
 ### 検証ステップ（推奨）
@@ -79,6 +120,7 @@ kubectl kustomize deploy/overlays/<system>
 ```
 
 出力を確認し、イメージタグ、レジストリ名、環境変数が正しく設定されていることを確認してください。
+あわせて `terminationGracePeriodSeconds: 70`(または上書きした値)が含まれていることを確認してください。
 
 ### マニフェストの適用
 

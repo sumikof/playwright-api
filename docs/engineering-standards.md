@@ -6,8 +6,9 @@
 ## 言語とランタイム
 
 - 言語: TypeScript(ESM、`"type": "module"`)。
-- ランタイム: Node.js 24 系(実行環境=devcontainer に一致。型定義は `@types/node` の都合で
-  `^20` を使用しているが、実行時ランタイムの基準は 24)。HTTP は Hono(`@hono/node-server`)、
+- ランタイム: Node.js 24 系(実行環境=devcontainer に一致)。型定義は `@types/node` の `^22`
+  (`node:sqlite` の型定義のため。最も古い実行ランタイムに合わせ、24 固有 API を誤って使わない
+  ようにする)。`node:sqlite` の前提として実行時 Node は 22.13 以上とする。HTTP は Hono(`@hono/node-server`)、
   OpenAPI は `@hono/zod-openapi`。
 - ブラウザ自動化: Playwright(`playwright` / `@playwright/test`)。
 

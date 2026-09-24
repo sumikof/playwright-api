@@ -168,6 +168,17 @@ docker build -t playwright-api:1.61.1 . && \
 
 正常にビルドされた場合、Node.js のバージョンが出力されます。
 
+### 4.6 DB データ取得 API の依存
+
+DB データ取得 API(`POST /queries/{id}`)のために追加の手順は不要です。
+
+- Oracle: `oracledb`(node-oracledb)を **Thin モード**で使います。Thin モードは pure JavaScript で
+  Oracle Instant Client もネイティブビルドも不要なため、`npm ci` → `vendor/node_modules.tar.gz` の
+  手順はそのまま使えます(プラットフォーム依存物を持ち込みません)。
+- SQLite: Node 組み込みの `node:sqlite` を使います(Node 22.13 以上が必要)。Playwright
+  `v1.61.1-noble` イメージの Node は 24 系のため、追加のパッケージは不要です。上記の
+  `node -v` で 22.13 以上であることを確認できます。
+
 ---
 
 ## 5. 更新時のバージョン対応

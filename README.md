@@ -32,6 +32,24 @@ curl -X POST http://localhost:3000/scenarios/login/runs \
 curl http://localhost:3000/scenarios/login/runs/01J...
 ```
 
+### DB データ取得 API を試す(SQLite)
+
+```bash
+# 開発用 DB を作る(demo.sqlite は gitignore 済み)
+npx tsx fixtures/demo-db/seed.ts ./demo.sqlite
+
+# DB を有効にして API サーバを起動
+BASE_URL=http://localhost:4321 DB_DIALECT=sqlite DB_SQLITE_FILE=./demo.sqlite npm run dev
+
+curl -X POST http://localhost:3000/queries/products \
+  -H 'content-type: application/json' \
+  -d '{"minPrice":400}'
+# → { "queryId": "products", "rowCount": 2, "durationMs": 1, "rows": [ { "id": 2, "name": "商品B", "price": 480 }, ... ] }
+```
+
+SQLite は Node 組み込みの `node:sqlite` を使うため、起動時に `ExperimentalWarning: SQLite is an
+experimental feature` が出るが動作に影響はない(`DB_DIALECT=sqlite` のときだけ出る)。
+
 ## API
 
 | メソッド・パス | 説明 |
@@ -40,10 +58,15 @@ curl http://localhost:3000/scenarios/login/runs/01J...
 | `POST /scenarios/{id}/runs` | 実行を受理し `202 { runId }` |
 | `GET /scenarios/{id}/runs/{runId}` | 実行結果（`data` は型付き） |
 | `GET /runs/{runId}/artifacts/{name}` | スクリーンショット/trace の配信 |
+| `GET /queries` | DB クエリ一覧（id, summary, tags） |
+| `POST /queries/{id}` | バインド変数を JSON で受け取り、DB を同期的に検索して行を返す |
 | `GET /doc` / `GET /ui` | OpenAPI JSON / Swagger UI |
 | `GET /health` | ヘルスチェック |
 
-シナリオを1つ追加すると、OpenAPI ドキュメントにそのパスと入力フォームが自動で増える。
+シナリオやクエリを1つ追加すると、OpenAPI ドキュメントにそのパスと入力フォームが自動で増える。
+
+`POST /queries/{id}` のステータス: `200`(0 件も `200`)/ `400` params 違反 / `500` DB エラー・
+行スキーマ違反・行数上限超過 / `503` DB 未設定(`DB_DIALECT` 未指定)/ `504` `DB_QUERY_TIMEOUT_MS` 超過。
 
 ## 環境変数
 
@@ -59,6 +82,42 @@ curl http://localhost:3000/scenarios/login/runs/01J...
 | `RUNS_DIR` | `./runs` | 実行結果の保存先 |
 | `RUN_RETENTION` | `50` | 保持する実行ディレクトリ数 |
 | `SCENARIO_TIMEOUT_MS` | `120000` | 1シナリオの実行時間上限 |
+| `DB_DIALECT` | (未設定) | `sqlite` \| `oracle`。未設定なら DB 機能は無効(`POST /queries/*` は `503`) |
+| `DB_SQLITE_FILE` | (sqlite 時必須) | SQLite ファイルパス(読み取り専用で開く。`:memory:` は不可) |
+| `DB_ORACLE_USER` | (oracle 時必須) | 接続ユーザー(SELECT 権限のみ推奨) |
+| `DB_ORACLE_PASSWORD` | (oracle 時必須) | パスワード(OpenShift では Secret から注入) |
+| `DB_ORACLE_CONNECT_STRING` | (oracle 時必須) | `host:port/service_name` 形式の Easy Connect 文字列 |
+| `DB_POOL_MAX` | `2` | Oracle 接続プール上限 |
+| `DB_QUERY_TIMEOUT_MS` | `30000` | 1クエリの上限。接続プール待ち + 実行の合計(Oracle のみ有効) |
+| `DB_MAX_ROWS` | `1000` | 1クエリが返せる最大行数(正の整数)。超過は `500`。定義の `maxRows` はこれ以下に限る |
+| `DB_SHUTDOWN_DRAIN_S` | `10` | 終了時に使用中の Oracle 接続の完了を待つ秒数 |
+
+## DB クエリを追加する
+
+SQL はリクエストではなくコードに置く(任意 SQL を実行する API は無い)。
+
+1. `src/queries/<name>.ts` に `defineQuery` で定義する(サンプル: `src/queries/products.ts`)
+2. `src/queries/index.ts` の `queries` に登録する
+
+```ts
+export const productsQuery = defineQuery({
+  id: 'products',                       // → POST /queries/products
+  summary: '指定価格以上の商品を取得する',
+  tags: ['catalog'],
+  params: z.object({ minPrice: z.number().int().nonnegative().default(0) }), // リクエストボディ
+  row: z.object({ id: z.number(), name: z.string(), price: z.number() }),     // 1 行の型
+  sql: `SELECT id AS "id", name AS "name", price AS "price"
+          FROM products WHERE price >= :minPrice ORDER BY id`,
+  // maxRows: 100,                     // 任意。DB_MAX_ROWS 以下
+})
+```
+
+- バインド変数は `:name` 形式。`params` のキーと SQL 中のバインド名は一致させる
+- 列名は `AS "name"` のように**二重引用符でエイリアスを明示**する(Oracle は引用符なし識別子を大文字で返すため)
+- 方言差が避けられない場合だけ `sql: { default: '...', oracle: '...', sqlite: '...' }` で上書きする
+- 返却行は `row` で検証され、違反は `500`。行数が上限を超えたら切り詰めずに `500`(`WHERE` や `FETCH FIRST n ROWS ONLY` で絞る)
+- 起動時に次を検出して落とす: id 重複、`SELECT` / `WITH` 以外の文、バインド名と `params` の不整合、不正な `maxRows`
+- 読み取り専用は **DB ユーザーの権限で担保**する(SELECT 権限のみのアカウントを使う)
 
 ## テスト
 
@@ -74,14 +133,19 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 1. `src/pages/` — 対象システムの Page Object を書く
 2. `src/scenarios/` — シナリオを定義し `src/scenarios/index.ts` に登録
 3. `tests/` — `@playwright/test` の spec を書く
-4. `fixtures/demo-app/` — **残す**（削除すると upstream merge 衝突を招くため。登録解除は fork 所有の `src/scenarios/index.ts` で行う）
-5. `BASE_URL` を対象システムに向ける
+4. `src/queries/` — DB クエリを定義し `src/queries/index.ts` に登録(DB を使わないならサンプルの登録を外す)
+5. `fixtures/demo-app/` / `fixtures/demo-db/` — **残す**（削除すると upstream merge 衝突を招くため。登録解除は fork 所有の `src/scenarios/index.ts` / `src/queries/index.ts` で行う）
+6. `BASE_URL` を対象システムに向ける(DB を使う場合は `DB_*` も設定する)
 
 ## 意図的に含めないもの
 
 認証、秘匿パラメータのマスク、リトライ、スケジューリング、動画記録。
 `params`（パスワード含む）は `runs/{runId}/result.json` に平文で残るため、
 共有環境では `runs/` のアクセス権を絞ること。
+DB クエリ API も無認証で、返すデータはシナリオ結果より機微になり得る。外部公開(Route)する場合は
+認証プロキシ・到達元制限を必ず設け、DB 接続ユーザーは SELECT 権限のみにすること。
+DB 関連で含めないもの: 任意 SQL の実行、書き込み、シナリオからの DB 参照、複数 DB の同時接続、
+Oracle Thick モード、ページング、結果の保存。
 
 ## 開発運用(このテンプレートを開発する場合)
 
@@ -106,8 +170,8 @@ npx playwright test # @playwright/test 経由のシナリオ実行
 | 所有 | パス |
 |---|---|
 | テンプレート(共通)所有 | `src/core/`, `Dockerfile`, `.dockerignore`, `deploy/base/`, `scripts/`, `package.json`, `tsconfig.json`, `playwright.config.ts`, `vitest.config.ts`, `docs/` |
-| システム(fork 側)所有 | `src/pages/`, `src/scenarios/`, `tests/`, `deploy/overlays/<system>/` |
-| 共有(参照のみ・削除しない) | `fixtures/demo-app/`, サンプルの pages/scenarios/spec |
+| システム(fork 側)所有 | `src/pages/`, `src/scenarios/`, `src/queries/`, `tests/`, `deploy/overlays/<system>/` |
+| 共有(参照のみ・削除しない) | `fixtures/demo-app/`, `fixtures/demo-db/`, サンプルの pages/scenarios/queries/spec |
 
 ルール:
 
@@ -115,9 +179,9 @@ npx playwright test # @playwright/test 経由のシナリオ実行
   upstream merge で受け取る。
 - `package.json` はテンプレート所有だが、fork 固有の依存追加は許容する(衝突時は fork 側で
   手動解決。頻度は低い想定)。
-- `fixtures/demo-app/` は**削除しない**(削除すると upstream merge で modify/delete 衝突が
-  発生するため)。サンプルシナリオの登録解除は fork 所有の `src/scenarios/index.ts` の編集で
-  行う(衝突しない)。
+- `fixtures/demo-app/` / `fixtures/demo-db/` は**削除しない**(削除すると upstream merge で
+  modify/delete 衝突が発生するため)。サンプルシナリオ・サンプルクエリの登録解除は fork 所有の
+  `src/scenarios/index.ts` / `src/queries/index.ts` の編集で行う(衝突しない)。
 
 ### fork の共通部分取り込み手順
 
