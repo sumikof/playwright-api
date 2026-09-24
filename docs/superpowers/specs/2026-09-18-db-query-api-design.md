@@ -1,7 +1,7 @@
 # DB データ取得 API(名前付きクエリ)設計
 
 日付: 2026-09-18
-状態: **ドラフト(主要判断はユーザー確認済み 2026-09-24。Codex 設計レビュー → ユーザー設計承認待ち)**
+状態: **承認済み**(Codex 設計レビュー収束 `1b5a78b`、ユーザー設計承認 2026-09-24)。実装計画は `docs/superpowers/plans/2026-09-24-db-query-api.md`
 
 ## 背景と目的
 
@@ -446,5 +446,7 @@ Playwright にのみ適用されており、`oracledb` はキャレット付き�
 
 ## 未決事項
 
-1. Playwright `v1.61.1-noble` イメージ同梱の Node バージョン(22.13 以上か)。実装時に確認し、
-   満たさなければ設計レビューへ戻す
+1. ~~Playwright `v1.61.1-noble` イメージ同梱の Node バージョン(22.13 以上か)。実装時に確認し、
+   満たさなければ設計レビューへ戻す~~ → **解消(2026-09-24)**: `microsoft/playwright` の `v1.61.1`
+   タグの `utils/docker/Dockerfile.noble` が `ARG NODE_VERSION=24`(NodeSource `node_24.x`)であることを
+   確認した。Node 24 系は `node:sqlite` を無フラグで利用できる
