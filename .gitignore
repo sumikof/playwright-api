@@ -33,3 +33,4 @@ runs/
 test-results/
 playwright-report/
 vendor/
+*.sqlite
