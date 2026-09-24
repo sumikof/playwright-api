@@ -231,8 +231,10 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
     だけで、`poolMin=0` の空き枠に対する最初の `getConnection()` は物理接続(DNS / TCP / Oracle
     Net)の確立を伴い、DB 停止や通信遮断時はこれが長引く。そこで `pool.getConnection()` も
     残り時間のタイマーと `Promise.race` し、期限到来なら `504` を返す。**期限後に遅れて解決した
-    接続は必ず `close()` してプールへ返す**(孤児 Promise に `.then(c => c.close())` を付け、
-    リークさせない)。あわせて Thin モードの `connectTimeout`(秒)をプール設定で
+    接続は必ず `close()` してプールへ返す**。孤児化した `getConnection()` の Promise には
+    `.then(c => c.close()).catch(err => log)` を付け、**取得失敗(遅延 reject)と `close()` 失敗の
+    双方を必ず catch してログに記録する**。既存の `src/index.ts` は `unhandledRejection` で
+    `process.exit(1)` するため、catch 漏れは API サーバ全体の停止につながる。あわせて Thin モードの `connectTimeout`(秒)をプール設定で
     `ceil(DB_QUERY_TIMEOUT_MS / 1000)` に設定するが、これは防御であり契約の根拠にはしない。
   - 接続取得後、残り時間 `remaining = deadline - now` を再計算(0 以下なら実行せずタイムアウト
     扱い)→ `execute(sql, binds, { outFormat: OBJECT, maxRows: limit + 1, fetchArraySize:
@@ -255,6 +257,9 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
     - `poolMax` 飽和時に後続リクエストが `DB_QUERY_TIMEOUT_MS` 以内に `504` で返ること
     - `getConnection()` が解決しない(接続確立が停止した)場合に `DB_QUERY_TIMEOUT_MS` 以内に
       `504` で返ること。期限後に遅れて解決した接続に対して `close()` が呼ばれること
+    - 期限後に `getConnection()` が遅延 reject した場合、および遅延解決後の `close()` が reject
+      した場合に、unhandled rejection が発生せず(`process.on('unhandledRejection')` をテスト内で
+      監視)ログに記録されること
     - `execute` に `maxRows: limit + 1` が渡され、`limit + 1` 行返ると `RowLimitExceededError`
       (→ `500`)、`limit` 行ちょうどなら成功すること
     - `execute` が個々の往復では `callTimeout` 未満だが合計で期限を超える(モックで `execute` の
@@ -356,7 +361,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 | `SqliteProvider` | `seedSqlite()` で一時ファイルを作り readOnly で開く。バインド・0件・SQL エラー・書き込み拒否・`maxRows + 1` 行で `RowLimitExceededError` を確認 |
 | `buildQueryRegistry` | id 重複、非 SELECT 文、バインド名と `params` の不整合、`maxRows` が非正・非整数・`NaN`・`DB_MAX_ROWS` 超過、を起動時に落とす |
 | `config` | `DB_MAX_ROWS` / `DB_SHUTDOWN_DRAIN_S` の無効値(`0`、負数、小数、文字列)で `loadConfig` が落ちる |
-| `OracleProvider` | `oracledb` をモックし、pool 取得 → `callTimeout` 設定 → `execute(maxRows: limit + 1)` → close(`finally`)の順序、`NJS-040` / 接続取得の期限到来(遅延解決した接続の `close()`)/ 実行の期限到来(`break()` 呼出)/ `callTimeout` の `504` 写像、`limit + 1` 行で `RowLimitExceededError`、`poolMax` 飽和時に上限時間内で `504`、`close()` が `pool.close(DB_SHUTDOWN_DRAIN_S)` を呼ぶことを確認 |
+| `OracleProvider` | `oracledb` をモックし、pool 取得 → `callTimeout` 設定 → `execute(maxRows: limit + 1)` → close(`finally`)の順序、`NJS-040` / 接続取得の期限到来(遅延解決した接続の `close()`、遅延 reject と `close()` 失敗が unhandled にならないこと)/ 実行の期限到来(`break()` 呼出)/ `callTimeout` の `504` 写像、`limit + 1` 行で `RowLimitExceededError`、`poolMax` 飽和時に上限時間内で `504`、`close()` が `pool.close(DB_SHUTDOWN_DRAIN_S)` を呼ぶことを確認 |
 | ルート(`app.test.ts` 拡張) | seed 済み一時 SQLite で `200`(行あり/0件)、`400`、`500`(行スキーマ違反・行数上限超過)、`503`(未設定)、OpenAPI にパスが出る |
 | 結合(`api.integration.test.ts`) | サーバ起動 → seed → `POST /queries/products` の end-to-end |
 | E2E(`playwright test`) | 変更なし(既存 2 件が green のまま) |
