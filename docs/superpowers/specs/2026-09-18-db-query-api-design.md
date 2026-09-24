@@ -363,7 +363,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 | `config` | `DB_MAX_ROWS` / `DB_SHUTDOWN_DRAIN_S` の無効値(`0`、負数、小数、文字列)で `loadConfig` が落ちる |
 | `OracleProvider` | `oracledb` をモックし、pool 取得 → `callTimeout` 設定 → `execute(maxRows: limit + 1)` → close(`finally`)の順序、`NJS-040` / 接続取得の期限到来(遅延解決した接続の `close()`、遅延 reject と `close()` 失敗が unhandled にならないこと)/ 実行の期限到来(`break()` 呼出)/ `callTimeout` の `504` 写像、`limit + 1` 行で `RowLimitExceededError`、`poolMax` 飽和時に上限時間内で `504`、`close()` が `pool.close(DB_SHUTDOWN_DRAIN_S)` を呼ぶことを確認 |
 | ルート(`app.test.ts` 拡張) | seed 済み一時 SQLite で `200`(行あり/0件)、`400`、`500`(行スキーマ違反・行数上限超過)、`503`(未設定)、OpenAPI にパスが出る |
-| 結合(`api.integration.test.ts`) | サーバ起動 → seed → `POST /queries/products` の end-to-end |
+| 結合(`api.integration.test.ts`) | `seedSqlite()` で一時ファイルを seed → その path を `DB_SQLITE_FILE` にしてサーバ起動 → `POST /queries/products` の end-to-end(Provider は readOnly で開くため seed が先。単体テストと同じ順序) |
 | E2E(`playwright test`) | 変更なし(既存 2 件が green のまま) |
 
 ## 開発フェーズ
