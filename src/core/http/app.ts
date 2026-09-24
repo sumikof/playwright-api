@@ -5,11 +5,14 @@ import { registerHealthRoute } from './routes/health.js'
 import { registerScenarioRoutes } from './routes/scenarios.js'
 import { registerArtifactRoute } from './routes/artifacts.js'
 import { registerSwaggerUI } from './routes/swagger-ui.js'
+import { registerQueryRoutes, type QueryRouteDeps } from './routes/queries.js'
 
 export interface AppDeps {
   scenarios: AnyScenario[]
   service: RunService
   runsDir: string
+  /** 省略時はクエリ API を登録しない */
+  queries?: QueryRouteDeps
 }
 
 export function createApp(deps: AppDeps): OpenAPIHono {
@@ -24,6 +27,7 @@ export function createApp(deps: AppDeps): OpenAPIHono {
   registerHealthRoute(app)
   registerScenarioRoutes(app, deps.scenarios, deps.service)
   registerArtifactRoute(app, deps.service, deps.runsDir)
+  if (deps.queries) registerQueryRoutes(app, deps.queries)
 
   app.doc('/doc', {
     openapi: '3.0.0',

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,10 @@ import { Queue } from '../run/queue.js'
 import { FileRunStore } from '../run/store.js'
 import { RunService } from '../run/service.js'
 import type { RunJob, RunResult } from '../run/types.js'
+import { defineQuery, type AnyQuery } from '../db/query.js'
+import { SqliteProvider } from '../db/sqlite.js'
+import { DbClosedError, DbTimeoutError, type DbProvider } from '../db/provider.js'
+import { createSqliteFile } from '../testing/sqlite.js'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'app-')) })
@@ -180,5 +185,159 @@ describe('artifact route', () => {
     const { app } = makeApp()
     const res = await app.request(`/runs/UNKNOWN/artifacts/${artifactName}`)
     expect(res.status).toBe(404)
+  })
+})
+
+describe('query routes', () => {
+  // src/ から fixtures/ は import できない(rootDir)ため seed.sql は fs で読む
+  const seedSql = readFileSync(new URL('../../../fixtures/demo-db/seed.sql', import.meta.url), 'utf8')
+  const productRow = z.object({ id: z.number(), name: z.string(), price: z.number() })
+  const productsQuery = defineQuery({
+    id: 'products',
+    summary: 'products by min price',
+    tags: ['catalog'],
+    params: z.object({ minPrice: z.number().int().nonnegative().default(0) }),
+    row: productRow,
+    sql: 'SELECT id AS "id", name AS "name", price AS "price" FROM products WHERE price >= :minPrice ORDER BY id',
+  })
+  const badRowQuery = defineQuery({
+    id: 'bad-row',
+    summary: 'row schema mismatch',
+    tags: [],
+    params: z.object({}),
+    row: z.object({ id: z.string() }),
+    sql: 'SELECT id AS "id" FROM products',
+  })
+  const limitedQuery = defineQuery({
+    id: 'limited',
+    summary: 'more rows than maxRows',
+    tags: [],
+    params: z.object({}),
+    row: productRow,
+    sql: 'SELECT id AS "id", name AS "name", price AS "price" FROM products',
+    maxRows: 2,
+  })
+  const queries = [productsQuery, badRowQuery, limitedQuery] as AnyQuery[]
+
+  let db: SqliteProvider
+  beforeEach(() => {
+    const file = join(dir, 'demo.sqlite')
+    createSqliteFile(file, seedSql)
+    db = new SqliteProvider(file)
+  })
+  afterEach(async () => { await db.close() })
+
+  function makeQueryApp(dbProvider: DbProvider | null, over: { maxRows?: number; timeoutMs?: number } = {}) {
+    const store = new FileRunStore(dir)
+    const queue = new Queue<RunJob>({ maxConcurrency: 1, maxQueue: 10 }, async () => {})
+    const service = new RunService(queue, store)
+    return createApp({
+      scenarios: [loginScenario],
+      service,
+      runsDir: dir,
+      queries: { queries, db: dbProvider, maxRows: over.maxRows ?? 1000, timeoutMs: over.timeoutMs ?? 30000 },
+    })
+  }
+
+  const post = (app: ReturnType<typeof makeQueryApp>, id: string, body: unknown) =>
+    app.request(`/queries/${id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  function stubDb(query: DbProvider['query']): DbProvider & { query: ReturnType<typeof vi.fn> } {
+    return { dialect: 'sqlite', query: vi.fn(query), close: async () => {} }
+  }
+
+  it('lists queries', async () => {
+    const res = await makeQueryApp(db).request('/queries')
+    expect(res.status).toBe(200)
+    expect((await res.json())[0]).toEqual({ id: 'products', summary: 'products by min price', tags: ['catalog'] })
+  })
+
+  it('returns matching rows with 200', async () => {
+    const res = await post(makeQueryApp(db), 'products', { minPrice: 400 })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({
+      queryId: 'products',
+      rowCount: 2,
+      rows: [
+        { id: 2, name: '商品B', price: 480 },
+        { id: 3, name: '商品C', price: 980 },
+      ],
+    })
+    expect(typeof body.durationMs).toBe('number')
+  })
+
+  it('returns 200 with no rows when nothing matches', async () => {
+    const res = await post(makeQueryApp(db), 'products', { minPrice: 99999 })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ rowCount: 0, rows: [] })
+  })
+
+  it('applies params defaults', async () => {
+    const res = await post(makeQueryApp(db), 'products', {})
+    expect((await res.json()).rowCount).toBe(3)
+  })
+
+  it.each([{ minPrice: -1 }, { minPrice: 'x' }])('rejects invalid params %j with 400', async (body) => {
+    const res = await post(makeQueryApp(db), 'products', body)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: { message: 'Invalid request' } })
+  })
+
+  it('returns 500 when rows do not match the row schema', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await post(makeQueryApp(db), 'bad-row', {})
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: { message: 'Query result does not match the row schema' } })
+    errSpy.mockRestore()
+  })
+
+  it('returns 500 when the row limit is exceeded', async () => {
+    const res = await post(makeQueryApp(db), 'limited', {})
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: { message: 'row limit exceeded (maxRows=2)' } })
+  })
+
+  it('returns 503 when the DB is not configured, but still lists queries', async () => {
+    const app = makeQueryApp(null)
+    const res = await post(app, 'products', {})
+    expect(res.status).toBe(503)
+    expect((await app.request('/queries')).status).toBe(200)
+  })
+
+  it('maps provider errors to 504 / 503 / 500', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cases: [Error, number, string][] = [
+      [new DbTimeoutError(), 504, 'Query timed out'],
+      [new DbClosedError(), 503, 'Database is shutting down'],
+      [new Error('ORA-00942: table or view does not exist'), 500, 'Query failed'],
+    ]
+    for (const [err, status, message] of cases) {
+      const res = await post(makeQueryApp(stubDb(async () => { throw err })), 'products', {})
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ error: { message } })
+    }
+    errSpy.mockRestore()
+  })
+
+  it('passes SQL binds, min(maxRows, DB_MAX_ROWS) and the timeout to the provider', async () => {
+    const stub = stubDb(async () => [])
+    const app = makeQueryApp(stub, { maxRows: 50, timeoutMs: 1234 })
+    await post(app, 'products', { minPrice: 10 })
+    expect(stub.query).toHaveBeenLastCalledWith(expect.stringContaining(':minPrice'), { minPrice: 10 }, { timeoutMs: 1234, maxRows: 50 })
+    await post(app, 'limited', {})
+    expect(stub.query).toHaveBeenLastCalledWith(expect.any(String), {}, { timeoutMs: 1234, maxRows: 2 })
+  })
+
+  it('exposes each query in the OpenAPI doc', async () => {
+    const doc = await (await makeQueryApp(db).request('/doc')).json()
+    const op = doc.paths['/queries/products'].post
+    expect(op.requestBody).toBeDefined()
+    expect(op.responses['200']).toBeDefined()
+    expect(Object.keys(op.responses)).toEqual(expect.arrayContaining(['400', '500', '503', '504']))
   })
 })
