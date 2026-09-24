@@ -188,8 +188,10 @@ export function createDbProvider(config: Config): DbProvider | null   // DB_DIAL
   存在しない。
 - `src/index.ts` の shutdown 順序は `server.close()` → `queue.drain()` → `provider.close()` →
   **`db?.close()`** → `process.exit(0)`。DB の drain はブラウザの drain と並行させず直列にする
-  (合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒。OpenShift の `terminationGracePeriodSeconds` を
-  それ以上にする旨を `docs/deploy-openshift.md` に書く)。
+  (合計上限は 30 + `DB_SHUTDOWN_DRAIN_S` 秒)。**`deploy/base/deployment.yaml` に
+  `terminationGracePeriodSeconds: 60` を設定する**(「デプロイ(OpenShift)」参照)。現状の
+  manifest は未設定で Kubernetes 既定の 30 秒のため、ブラウザの drain だけで猶予を使い切ると
+  `db.close()` に到達する前に Pod が強制終了される。
 - テスト(`oracledb` モック): `close()` が `pool.close(drainTime)` を `DB_SHUTDOWN_DRAIN_S` で
   呼ぶこと、`close()` 後の `query()` が `503` 相当のエラーになること。
 
@@ -325,6 +327,13 @@ fixtures/demo-db/    ← 共有(削除しない)
 - パスワードは `Secret` から `DB_ORACLE_PASSWORD` として注入する。`deploy/base/deployment.yaml` に
   `envFrom.secretRef`(`optional: true`)を追加し、overlay 側に `secret.yaml` の**見本**
   (値は placeholder)を置く。実値はクラスタ側で作成する旨を `docs/deploy-openshift.md` に書く。
+- **`deploy/base/deployment.yaml` の `spec.template.spec` に `terminationGracePeriodSeconds: 60`
+  を追加する**。内訳: `queue.drain()` 上限 30 秒 + `DB_SHUTDOWN_DRAIN_S` 既定 10 秒 +
+  `provider.close()` / プロセス終了の余裕 20 秒。overlay 側で `DB_SHUTDOWN_DRAIN_S` を増やす場合は
+  `terminationGracePeriodSeconds` も `30 + DB_SHUTDOWN_DRAIN_S + 20` 以上に上書きする旨を
+  `docs/deploy-openshift.md` に書き、example overlay にコメントで併記する。
+  検証: `kubectl kustomize deploy/overlays/example` の出力に `terminationGracePeriodSeconds: 60`
+  が含まれること(既存の Phase 3 検証コマンドに追加)。
 - Docker イメージへの追加は不要(`oracledb` Thin は pure JS、`node:sqlite` は Node 組み込み)。
   ただし **ベースイメージ同梱の Node が 22.13 以上であること**を実装時に確認する(Playwright
   `v1.61.1-noble` の Node バージョン)。満たさない場合は SQLite を開発専用と割り切りコンテナでは
@@ -349,7 +358,7 @@ fixtures/demo-db/    ← 共有(削除しない)
 | 1 | DB 抽象 + SQLite + 設定(`src/core/db/`, `config.ts`, `@types/node` 更新) | `npm test` green、新規ユニット追加 |
 | 2 | クエリ定義・レジストリ・HTTP ルート・サンプル・seed | Swagger UI から `products` を実行できる。ルート/結合テスト green |
 | 3 | Oracle Provider | モックテスト green。ユーザー環境の Oracle で `products` 相当が `200` |
-| 4 | ドキュメント・デプロイ(README、offline-build、deploy-openshift、overlay、engineering-standards) | レビュー |
+| 4 | ドキュメント・デプロイ(README、offline-build、deploy-openshift、`deployment.yaml` の `terminationGracePeriodSeconds` / `secretRef`、overlay、engineering-standards) | レビュー。`kubectl kustomize deploy/overlays/example` に `terminationGracePeriodSeconds: 60` が含まれる |
 
 ## 意図的に含めないもの(YAGNI)
 
