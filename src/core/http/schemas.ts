@@ -46,3 +46,18 @@ export function runResultSchema(resultSchema: z.ZodType) {
     artifacts: z.array(artifactSchema),
   })
 }
+
+export const querySummarySchema = z.object({
+  id: z.string(),
+  summary: z.string(),
+  tags: z.array(z.string()),
+})
+
+export function queryResultSchema(rowSchema: z.ZodType) {
+  return z.object({
+    queryId: z.string(),
+    rowCount: z.number(),
+    durationMs: z.number(),
+    rows: z.array(rowSchema),
+  })
+}

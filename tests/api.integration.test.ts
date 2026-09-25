@@ -13,6 +13,12 @@ import { createBrowserProvider } from '../src/core/browser/provider.js'
 import { loginScenario } from '../src/scenarios/login.js'
 import type { RunJob } from '../src/core/run/types.js'
 import type { Hono } from 'hono'
+import type { AddressInfo } from 'node:net'
+import { seedSqlite } from '../fixtures/demo-db/seed.js'
+import { loadConfig } from '../src/core/config.js'
+import { createDbProvider, type DbProvider } from '../src/core/db/provider.js'
+import { buildQueryRegistry } from '../src/core/db/query.js'
+import { queries } from '../src/queries/index.js'
 
 const DEMO_PORT = 4399
 let demoServer: ServerType
@@ -77,5 +83,52 @@ describe('API integration', () => {
     const names = body.artifacts.map((a: any) => a.name)
     expect(names).toContain('trace.zip')
     expect(names).toContain('failure.png')
+  })
+})
+
+describe('query API integration', () => {
+  let queryServer: ServerType
+  let queryDir: string
+  let db: DbProvider | null
+  let url: string
+
+  beforeAll(async () => {
+    // Provider は readOnly で開くため、seed → サーバ起動 → POST の順
+    queryDir = await mkdtemp(join(tmpdir(), 'integ-db-'))
+    const file = join(queryDir, 'demo.sqlite')
+    seedSqlite(file)
+    const config = loadConfig({ BASE_URL: 'http://localhost', DB_DIALECT: 'sqlite', DB_SQLITE_FILE: file, RUNS_DIR: queryDir })
+    db = createDbProvider(config)
+    buildQueryRegistry(queries, { maxRows: config.db.maxRows })
+    const store = new FileRunStore(queryDir)
+    const queue = new Queue<RunJob>({ maxConcurrency: 1, maxQueue: 1 }, async () => {})
+    const queryApp = createApp({
+      scenarios: [],
+      service: new RunService(queue, store),
+      runsDir: queryDir,
+      queries: { queries, db, maxRows: config.db.maxRows, timeoutMs: config.db.queryTimeoutMs },
+    })
+    queryServer = await new Promise<ServerType>((resolve) => {
+      const s = serve({ fetch: queryApp.fetch, port: 0 }, () => resolve(s))
+    })
+    url = `http://127.0.0.1:${(queryServer.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    try { if (queryServer) await new Promise((r) => queryServer.close(r)) } catch {}
+    try { if (db) await db.close() } catch {}
+    try { if (queryDir) await rm(queryDir, { recursive: true, force: true }) } catch {}
+  })
+
+  it('runs the sample products query over HTTP', async () => {
+    const res = await fetch(`${url}/queries/products`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ minPrice: 400 }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.rowCount).toBe(2)
+    expect(body.rows.map((r: any) => r.name)).toEqual(['商品B', '商品C'])
   })
 })
